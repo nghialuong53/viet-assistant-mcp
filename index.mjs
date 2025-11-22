@@ -7,7 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { XMLParser } from "fast-xml-parser";
-import { z } from "zod";
+
 
 // ----------------------
 // TẠO MCP SERVER
