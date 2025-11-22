@@ -6,6 +6,8 @@ import fetch from "node-fetch";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
+import { XMLParser } from "fast-xml-parser";
+import { z } from "zod";
 
 // ----------------------
 // TẠO MCP SERVER
@@ -140,3 +142,173 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Vietnam Story MCP running at http://localhost:${port}/mcp`);
 });
+/* -------------------------------------------------
+ * TIN TỨC VIỆT NAM – RSS CÁC BÁO LỚN
+ * ------------------------------------------------- */
+
+const rssParser = new XMLParser({ ignoreAttributes: false });
+
+// Các chủ đề chính (anh có thể dùng để lọc)
+const NEWS_CATEGORIES = [
+  "all",
+  "general",
+  "politics",
+  "business",
+  "technology",
+  "sports",
+  "entertainment"
+];
+
+// 5 báo Việt Nam phổ biến
+const NEWS_FEEDS = [
+  {
+    id: "vnexpress-tin-moi",
+    name: "VnExpress - Tin mới nhất",
+    category: "general",
+    url: "https://vnexpress.net/rss/tin-moi-nhat.rss"
+  },
+  {
+    id: "tuoitre-tin-moi",
+    name: "Tuổi Trẻ - Tin mới nhất",
+    category: "general",
+    url: "https://tuoitre.vn/rss/tin-moi-nhat.rss"
+  },
+  {
+    id: "thanhnien-thoi-su",
+    name: "Thanh Niên - Thời sự",
+    category: "politics",
+    url: "https://thanhnien.vn/rss/thoi-su.rss"
+  },
+  {
+    id: "vietnamnet-tin-moi",
+    name: "VietNamNet - Tin mới nhất",
+    category: "general",
+    url: "https://vietnamnet.vn/rss/tin-moi-nhat.rss"
+  },
+  {
+    id: "dantri-tin-moi",
+    name: "Dân Trí - Tin mới",
+    category: "general",
+    url: "https://dantri.com.vn/rss/home.rss"
+  }
+];
+/* -------------------------------------------------
+ * TOOL: get_latest_vn_news
+ * Lấy tin tức mới nhất từ các báo Việt Nam
+ * ------------------------------------------------- */
+
+server.registerTool(
+  "get_latest_vn_news",
+  {
+    title: "Tin tức Việt Nam mới nhất",
+    description:
+      "Lấy danh sách tin mới từ các báo lớn Việt Nam (VnExpress, Tuổi Trẻ, Thanh Niên, VietNamNet, Dân Trí). " +
+      "Có thể lọc theo chủ đề và giới hạn số bài trên mỗi nguồn.",
+    inputSchema: {
+      category: z
+        .enum(NEWS_CATEGORIES)
+        .default("all")
+        .describe(
+          "Chủ đề: all, general, politics, business, technology, sports, entertainment. " +
+            "Nếu không chắc thì cứ để 'all'."
+        ),
+      limitPerSource: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .default(3)
+        .describe("Số bài tối đa lấy từ MỖI báo (1-10). Mặc định 3.")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      category: z.string().optional(),
+      limitPerSource: z.number().optional(),
+      items: z
+        .array(
+          z.object({
+            title: z.string(),
+            link: z.string(),
+            publishedAt: z.string().optional(),
+            source: z.string(),
+            category: z.string(),
+            feedId: z.string()
+          })
+        )
+        .optional(),
+      errors: z
+        .array(
+          z.object({
+            feedId: z.string(),
+            source: z.string(),
+            error: z.string()
+          })
+        )
+        .optional()
+    }
+  },
+  async ({ category, limitPerSource }) => {
+    const limit = limitPerSource ?? 3;
+
+    // Chọn feed theo chủ đề
+    const feedsToUse =
+      category === "all"
+        ? NEWS_FEEDS
+        : NEWS_FEEDS.filter((f) => f.category === category);
+
+    const allItems = [];
+    const errors = [];
+
+    await Promise.all(
+      feedsToUse.map(async (feed) => {
+        try {
+          const res = await fetch(feed.url);
+          if (!res.ok) {
+            errors.push({
+              feedId: feed.id,
+              source: feed.name,
+              error: `HTTP ${res.status}`
+            });
+            return;
+          }
+
+          const xmlText = await res.text();
+          const json = rssParser.parse(xmlText);
+          const channel = json?.rss?.channel;
+
+          let items = channel?.item || [];
+          if (!Array.isArray(items)) {
+            items = items ? [items] : [];
+          }
+
+          items.slice(0, limit).forEach((item) => {
+            allItems.push({
+              title: item.title || "",
+              link: item.link || "",
+              publishedAt: item.pubDate || "",
+              source: feed.name,
+              category: feed.category,
+              feedId: feed.id
+            });
+          });
+        } catch (err) {
+          errors.push({
+            feedId: feed.id,
+            source: feed.name,
+            error: err?.message || String(err)
+          });
+        }
+      })
+    );
+
+    return makeResult({
+      success: true,
+      message: `Đã lấy tin tức mới nhất từ ${feedsToUse.length} nguồn báo Việt Nam.`,
+      category,
+      limitPerSource: limit,
+      items: allItems,
+      errors: errors.length ? errors : undefined
+    });
+  }
+);
