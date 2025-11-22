@@ -1,7 +1,7 @@
 {
   "name": "viet-assistant-mcp",
   "version": "1.0.0",
-  "description": "MCP server cho tro ly Viet: thoi tiet, tin tuc, gia vang/USD/crypto, xo so, radio, podcast.",
+  "description": "MCP server gom 4 tien ich: tin tuc, gia vang/ty gia/coin, xo so mien nam, nguon ke chuyen.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
