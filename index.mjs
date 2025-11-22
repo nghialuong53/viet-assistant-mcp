@@ -1,362 +1,586 @@
-#!/usr/bin/env node
+// index.mjs
+// MCP server đa tiện ích cho Việt Nam:
+// - 1) Thời tiết
+// - 2) Tin tức
+// - 3) Giá vàng / USD / crypto
+// - 4) Xổ số
+// - 5) Radio
+// - 6) Podcast
+// Yêu cầu: Node >= 18 (có sẵn fetch).
 
-import { McpServer } from "@modelcontextprotocol/sdk/server";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/stdio";
-import { z } from "@modelcontextprotocol/sdk/zod";
-import { parseStringPromise } from "xml2js";
+import express from "express";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
+import { XMLParser } from "fast-xml-parser";
 
-
-// ==============================
-// CẤU HÌNH NGUỒN DỮ LIỆU
-// ==============================
-
-// 1) 5 báo Việt Nam
-const NEWS_SOURCES = [
-  {
-    name: "VnExpress",
-    url: process.env.NEWS_VNEXPRESS_RSS || "https://vnexpress.net/rss/tin-moi-nhat.rss",
-  },
-  {
-    name: "TuoiTre",
-    url: process.env.NEWS_TUOITRE_RSS || "https://tuoitre.vn/rss/tin-moi-nhat.rss",
-  },
-  {
-    name: "ThanhNien",
-    url: process.env.NEWS_THANHNIEN_RSS || "https://thanhnien.vn/rss/home.rss",
-  },
-  {
-    name: "DanTri",
-    url: process.env.NEWS_DANTRI_RSS || "https://dantri.com.vn/rss/tin-moi-nhat.rss",
-  },
-  {
-    name: "VietNamNet",
-    url: process.env.NEWS_VIETNAMNET_RSS || "https://vietnamnet.vn/rss/tin-moi-nhat.rss",
-  },
-];
-
-// 2) Xổ số miền Nam
-const LOTTERY_RSS_SOUTH =
-  process.env.LOTTERY_RSS_SOUTH || "https://xskt.me/rss/mien-nam";
-
-// 3) Nguồn truyện
-const STORY_SOURCES = [
-  process.env.STORY_SRC_1 || "https://truyencotich.vn/rss",
-  process.env.STORY_SRC_2 || "https://truyenchobe.com/rss",
-  process.env.STORY_SRC_3 || "https://truyenchobeyeu.com/rss",
-  process.env.STORY_SRC_4 || "https://truyenngan.com.vn/rss",
-  process.env.STORY_SRC_5 || "https://www.rfa.org/vietnamese/programs/ChildrenStory/story.rss",
-];
-
-// ==============================
-// HÀM HỖ TRỢ
-// ==============================
-
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Fetch JSON lỗi: ${res.status} ${res.statusText}`);
-  }
-  return res.json();
-}
-
-async function fetchText(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Fetch text lỗi: ${res.status} ${res.statusText}`);
-  }
-  return res.text();
-}
-
-// Parse RSS (XML) → danh sách item đơn giản
-async function fetchRssItems(url, limit = 5) {
-  try {
-    const xml = await fetchText(url);
-    const parsed = await parseStringPromise(xml, { explicitArray: false });
-    const channel = parsed?.rss?.channel;
-    if (!channel) return [];
-
-    let items = channel.item || [];
-    if (!Array.isArray(items)) items = [items];
-
-    return items.slice(0, limit).map((item) => ({
-      title: item.title,
-      link: item.link,
-      description: item.description,
-      pubDate: item.pubDate,
-    }));
-  } catch (err) {
-    return [
-      {
-        title: `Không đọc được RSS: ${url}`,
-        link: url,
-        description: String(err),
-        pubDate: null,
-      },
-    ];
-  }
-}
-
-// ==============================
-// KHỞI TẠO MCP SERVER
-// ==============================
-
+// Tạo MCP server
 const server = new McpServer({
   name: "viet-assistant-mcp",
-  version: "1.0.1",
+  version: "1.0.0"
 });
 
-// -------------------------------------------------
-// TOOL 1: Tin tức mới từ 5 báo Việt Nam
-// -------------------------------------------------
+// Hàm trả kết quả chuẩn MCP
+function makeResult(output) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(output, null, 2)
+      }
+    ],
+    structuredContent: output
+  };
+}
 
-server.tool(
-  "news_latest",
-  "Lấy tin tức mới nhất từ 5 báo Việt Nam lớn (VnExpress, Tuổi Trẻ, Thanh Niên, Dân Trí, VietNamNet).",
+/* -------------------------------------------------
+ * 1. TOOL: THỜI TIẾT (Open-Meteo)
+ * ------------------------------------------------- */
+
+server.registerTool(
+  "get_weather",
   {
-    inputSchema: z
-      .object({
-        limitPerSource: z.number().int().min(1).max(10).default(3),
-        category: z
-          .enum([
-            "tat_ca",
-            "thoi_su",
-            "chinh_tri",
-            "kinh_doanh",
-            "cong_nghe",
-            "bong_da",
-            "the_thao",
-            "du_lich",
-            "giai_tri",
-          ])
-          .default("tat_ca"),
-      })
-      .describe("Giới hạn số tin trên mỗi nguồn (tạm thời chủ yếu dùng tat_ca)"),
+    title: "Lấy thời tiết hiện tại",
+    description:
+      "Lấy nhiệt độ, gió, thời tiết hiện tại cho 1 địa điểm (ví dụ: 'Tay Ninh, Vietnam').",
+    inputSchema: {
+      location: z
+        .string()
+        .describe("Tên thành phố/khu vực, ví dụ: 'Ho Chi Minh', 'Tay Ninh, Vietnam'")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      location: z.string().optional(),
+      latitude: z.number().optional(),
+      longitude: z.number().optional(),
+      temperatureC: z.number().optional(),
+      windspeedKmh: z.number().optional(),
+      weatherCode: z.number().optional(),
+      weatherText: z.string().optional(),
+      raw: z.any().optional()
+    }
   },
-  async ({ input }) => {
-    const { limitPerSource } = input;
+  async ({ location }) => {
+    try {
+      const geoUrl =
+        "https://geocoding-api.open-meteo.com/v1/search?name=" +
+        encodeURIComponent(location) +
+        "&count=1&language=vi&format=json";
 
-    const results = [];
-    for (const src of NEWS_SOURCES) {
-      const items = await fetchRssItems(src.url, limitPerSource);
-      results.push({
-        source: src.name,
-        rssUrl: src.url,
-        items,
+      const geoRes = await fetch(geoUrl);
+      if (!geoRes.ok) {
+        return makeResult({
+          success: false,
+          message: "Không gọi được API geocoding (Open-Meteo)."
+        });
+      }
+      const geo = await geoRes.json();
+      if (!geo.results || geo.results.length === 0) {
+        return makeResult({
+          success: false,
+          message: "Không tìm thấy địa điểm phù hợp."
+        });
+      }
+
+      const place = geo.results[0];
+      const { latitude, longitude, name, country } = place;
+
+      const weatherUrl =
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}` +
+        `&current_weather=true&timezone=auto`;
+
+      const wRes = await fetch(weatherUrl);
+      if (!wRes.ok) {
+        return makeResult({
+          success: false,
+          message: "Không gọi được API thời tiết (Open-Meteo)."
+        });
+      }
+      const weather = await wRes.json();
+      const current = weather.current_weather;
+
+      const codeMap = {
+        0: "Trời quang",
+        1: "Ít mây",
+        2: "Có mây",
+        3: "Nhiều mây",
+        45: "Sương mù",
+        48: "Sương giá",
+        51: "Mưa phùn nhẹ",
+        53: "Mưa phùn vừa",
+        55: "Mưa phùn to",
+        61: "Mưa nhỏ",
+        63: "Mưa vừa",
+        65: "Mưa to",
+        71: "Tuyết rơi nhẹ",
+        73: "Tuyết rơi vừa",
+        75: "Tuyết rơi dày",
+        80: "Mưa rào nhẹ",
+        81: "Mưa rào vừa",
+        82: "Mưa rào to",
+        95: "Dông",
+        96: "Dông kèm mưa đá",
+        99: "Dông rất mạnh kèm mưa đá"
+      };
+
+      const output = {
+        success: true,
+        message: "Lấy dữ liệu thời tiết thành công.",
+        location: `${name}${country ? ", " + country : ""}`,
+        latitude,
+        longitude,
+        temperatureC: current.temperature,
+        windspeedKmh: current.windspeed,
+        weatherCode: current.weathercode,
+        weatherText: codeMap[current.weathercode] || "Không rõ",
+        raw: current
+      };
+
+      return makeResult(output);
+    } catch (err) {
+      return makeResult({
+        success: false,
+        message: "Lỗi nội bộ khi lấy thời tiết: " + err.message
       });
     }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              note:
-                "Tin được lấy từ RSS báo Việt Nam. Model hãy tóm tắt và đọc lại cho người dùng bằng tiếng Việt dễ hiểu.",
-              data: results,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  },
+  }
 );
 
-// -------------------------------------------------
-// TOOL 2: Giá vàng, tỷ giá, crypto
-// -------------------------------------------------
+/* -------------------------------------------------
+ * 2. TOOL: TIN TỨC (RSS VnExpress)
+ * ------------------------------------------------- */
 
-server.tool(
-  "finance_overview",
-  "Lấy nhanh tỷ giá USD/VND, một số tỷ giá khác, và giá một vài đồng crypto phổ biến (BTC, ETH, USDT).",
+const rssParser = new XMLParser({ ignoreAttributes: false });
+
+server.registerTool(
+  "get_news_headlines",
   {
-    inputSchema: z
-      .object({
-        includeGold: z.boolean().default(true),
-        includeForex: z.boolean().default(true),
-        includeCrypto: z.boolean().default(true),
-      })
-      .describe("Mặc định lấy hết: tỷ giá, vàng (note), crypto."),
+    title: "Lấy tin tức mới nhất",
+    description:
+      "Lấy danh sách tiêu đề tin tức mới nhất từ RSS (hiện tại hỗ trợ VnExpress).",
+    inputSchema: {
+      source: z
+        .enum(["vnexpress"])
+        .default("vnexpress")
+        .describe("Nguồn tin: hiện tại chỉ hỗ trợ 'vnexpress'."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(5)
+        .describe("Số lượng bản tin muốn lấy (1-20).")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      source: z.string().optional(),
+      items: z
+        .array(
+          z.object({
+            title: z.string(),
+            link: z.string(),
+            publishedAt: z.string().optional(),
+            description: z.string().optional()
+          })
+        )
+        .optional(),
+      raw: z.any().optional()
+    }
   },
-  async ({ input }) => {
-    const { includeGold, includeForex, includeCrypto } = input;
-
-    const output = {
-      forex: null,
-      gold: null,
-      crypto: null,
-    };
-
-    // Forex
-    if (includeForex) {
-      try {
-        const data = await fetchJson("https://open.er-api.com/v6/latest/USD");
-        output.forex = {
-          base: data.base_code,
-          lastUpdate: data.time_last_update_utc,
-          rates: {
-            VND: data.rates.VND,
-            EUR: data.rates.EUR,
-            JPY: data.rates.JPY,
-            GBP: data.rates.GBP,
-            CNY: data.rates.CNY,
-          },
-        };
-      } catch (err) {
-        output.forex = { error: String(err) };
+  async ({ source, limit }) => {
+    try {
+      let feedUrl;
+      switch (source) {
+        case "vnexpress":
+        default:
+          feedUrl = "https://vnexpress.net/rss/tin-moi-nhat.rss";
+          break;
       }
-    }
 
-    // Vàng – chỉ note trạng thái
-    if (includeGold) {
-      output.gold = {
-        note:
-          "Phiên bản hiện tại chưa kết nối API giá vàng trực tiếp. Model hãy nói rõ với người dùng nếu họ hỏi giá vàng.",
-      };
-    }
-
-    // Crypto
-    if (includeCrypto) {
-      try {
-        const ids = "bitcoin,ethereum,tether";
-        const vs = "usd,vnd";
-        const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=${vs}`;
-        const data = await fetchJson(url);
-        output.crypto = data;
-      } catch (err) {
-        output.crypto = {
-          error: "Không lấy được giá crypto (có thể do giới hạn hoặc thay đổi API).",
-          detail: String(err),
-        };
-      }
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              note:
-                "Model hãy tóm tắt lại cho người dùng bằng tiếng Việt: tỷ giá (nhất là VND), và giá BTC/ETH/USDT. Với vàng thì giải thích là chưa có số liệu realtime.",
-              data: output,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  },
-);
-
-// -------------------------------------------------
-// TOOL 3: KQXS Miền Nam
-// -------------------------------------------------
-
-server.tool(
-  "lottery_south_history",
-  "Đọc kết quả xổ số Miền Nam trong một số ngày gần đây dựa trên RSS.",
-  {
-    inputSchema: z
-      .object({
-        days: z.number().int().min(1).max(7).default(7),
-      })
-      .describe("Số ngày gần đây muốn lấy, tối đa 7."),
-  },
-  async ({ input }) => {
-    const { days } = input;
-
-    const items = await fetchRssItems(LOTTERY_RSS_SOUTH, days);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              note:
-                "Các bản tin kết quả xổ số Miền Nam lấy từ RSS. Model hãy đọc lại cho người dùng theo yêu cầu (đài nào, ngày nào, giải đặc biệt...).",
-              rssUrl: LOTTERY_RSS_SOUTH,
-              items,
-            },
-            null,
-            2,
-          ),
-        },
-      ],
-    };
-  },
-);
-
-// -------------------------------------------------
-// TOOL 4: Kể chuyện
-// -------------------------------------------------
-
-server.tool(
-  "story_mix",
-  "Kể chuyện cổ tích / thiếu nhi / truyện sáng tạo theo chủ đề người dùng yêu cầu.",
-  {
-    inputSchema: z
-      .object({
-        topic: z
-          .string()
-          .describe("Chủ đề / nhân vật chính (vd: 'cậu bé bán trà sữa robot')."),
-        style: z
-          .enum(["co_tich_viet_nam", "thieu_nhi_hai_huoc", "suy_ngam_cam_dong", "ngau_nhien"])
-          .default("co_tich_viet_nam"),
-        length: z.enum(["rat_ngan", "ngan", "vua", "dai"]).default("vua"),
-      })
-      .describe("Thông tin để tạo truyện."),
-  },
-  async ({ input }) => {
-    const { topic, style, length } = input;
-
-    const storyHints = [];
-    for (const url of STORY_SOURCES) {
-      try {
-        const items = await fetchRssItems(url, 2);
-        storyHints.push({
-          source: url,
-          titles: items.map((it) => it.title),
+      const res = await fetch(feedUrl);
+      if (!res.ok) {
+        return makeResult({
+          success: false,
+          message: "Không gọi được RSS feed."
         });
-      } catch {
-        // bỏ qua nếu lỗi
+      }
+
+      const xmlText = await res.text();
+      const json = rssParser.parse(xmlText);
+      const channel = json?.rss?.channel;
+      let items = channel?.item || [];
+
+      if (!Array.isArray(items)) {
+        items = items ? [items] : [];
+      }
+
+      const mapped = items.slice(0, limit).map((item) => ({
+        title: item.title || "",
+        link: item.link || "",
+        publishedAt: item.pubDate || "",
+        description: item.description || ""
+      }));
+
+      return makeResult({
+        success: true,
+        message: "Lấy tin tức thành công.",
+        source,
+        items: mapped,
+        raw: { channelTitle: channel?.title }
+      });
+    } catch (err) {
+      return makeResult({
+        success: false,
+        message: "Lỗi nội bộ khi lấy tin tức: " + err.message
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------
+ * 3. TOOL: GIÁ VÀNG, GIÁ USD, GIÁ TIỀN SỐ
+ * ------------------------------------------------- */
+
+server.registerTool(
+  "get_market_summary",
+  {
+    title: "Giá vàng, USD, crypto",
+    description:
+      "Lấy giá vàng (XAU), tỷ giá USD/VND và giá một số crypto so với USD hoặc VND.",
+    inputSchema: {
+      baseFiat: z
+        .string()
+        .default("USD")
+        .describe("Tiền tệ gốc để quy đổi, mặc định USD."),
+      fiatSymbols: z
+        .array(z.string())
+        .default(["VND"])
+        .describe("Danh sách tiền pháp định muốn lấy (ví dụ: ['VND'])."),
+      cryptoSymbols: z
+        .array(z.string())
+        .default(["BTC", "ETH", "USDT"])
+        .describe(
+          "Danh sách mã crypto (BTC, ETH, USDT...) dùng chuẩn exchangerate.host."
+        ),
+      includeGold: z
+        .boolean()
+        .default(true)
+        .describe("Có lấy giá vàng (XAU) hay không.")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      baseFiat: z.string().optional(),
+      date: z.string().optional(),
+      rates: z.record(z.number()).optional(),
+      note: z.string().optional()
+    }
+  },
+  async ({ baseFiat, fiatSymbols, cryptoSymbols, includeGold }) => {
+    try {
+      const symbols = [
+        ...fiatSymbols,
+        ...cryptoSymbols,
+        ...(includeGold ? ["XAU"] : [])
+      ];
+      const url =
+        "https://api.exchangerate.host/latest?base=" +
+        encodeURIComponent(baseFiat) +
+        "&symbols=" +
+        encodeURIComponent(symbols.join(","));
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        return makeResult({
+          success: false,
+          message: "Không gọi được API exchangerate.host."
+        });
+      }
+
+      const data = await res.json();
+      if (!data || !data.rates) {
+        return makeResult({
+          success: false,
+          message: "Dữ liệu trả về không hợp lệ."
+        });
+      }
+
+      const noteParts = [];
+      if (includeGold && data.rates["XAU"]) {
+        noteParts.push(
+          `Giá vàng: 1 ${baseFiat} = ${data.rates["XAU"]} XAU (vàng).`
+        );
+      }
+      if (data.rates["VND"]) {
+        noteParts.push(
+          `Tỷ giá tham khảo: 1 ${baseFiat} ≈ ${data.rates["VND"]} VND.`
+        );
+      }
+
+      return makeResult({
+        success: true,
+        message: "Lấy dữ liệu thị trường thành công.",
+        baseFiat,
+        date: data.date,
+        rates: data.rates,
+        note: noteParts.join(" ")
+      });
+    } catch (err) {
+      return makeResult({
+        success: false,
+        message: "Lỗi nội bộ khi lấy giá thị trường: " + err.message
+      });
+    }
+  }
+);
+
+/* -------------------------------------------------
+ * 4. TOOL: XỔ SỐ (trả về link tra cứu)
+ * ------------------------------------------------- */
+
+server.registerTool(
+  "get_lottery_portal",
+  {
+    title: "Link tra cứu kết quả xổ số",
+    description:
+      "Trả về link tra cứu kết quả xổ số 3 miền (Bắc, Trung, Nam) trên Minh Ngọc.",
+    inputSchema: {
+      region: z
+        .enum(["mien-bac", "mien-trung", "mien-nam"])
+        .default("mien-bac")
+        .describe("mien-bac | mien-trung | mien-nam")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      region: z.string().optional(),
+      url: z.string().optional()
+    }
+  },
+  async ({ region }) => {
+    let url;
+    if (region === "mien-bac") {
+      url = "https://www.minhngoc.net.vn/ket-qua-xo-so/mien-bac.html";
+    } else if (region === "mien-trung") {
+      url = "https://www.minhngoc.net.vn/ket-qua-xo-so/mien-trung.html";
+    } else {
+      url = "https://www.minhngoc.net.vn/ket-qua-xo-so/mien-nam.html";
+    }
+
+    return makeResult({
+      success: true,
+      message: "Đã trả về link tra cứu xổ số.",
+      region,
+      url
+    });
+  }
+);
+
+/* -------------------------------------------------
+ * 5. TOOL: RADIO (get_radio_channels)
+ * ------------------------------------------------- */
+
+// Dữ liệu tĩnh radio
+const RADIO_CHANNELS = [
+  {
+    id: "vov1",
+    name: "VOV1 - Thời sự Chính trị Tổng hợp",
+    description: "Kênh thời sự, chính trị, tổng hợp của Đài Tiếng nói Việt Nam.",
+    page_url: "https://vov1.vov.gov.vn/",
+    stream_url: "https://stream.mediatech.vn/vov1"
+  },
+  {
+    id: "vov-gt-hn",
+    name: "VOV Giao Thông Hà Nội",
+    description: "Kênh VOV Giao Thông FM 91MHz – tin giao thông, đời sống đô thị.",
+    page_url: "https://vovgiaothong.vn/",
+    stream_url: "https://stream.mediatech.vn/vovgt-hn"
+  },
+  {
+    id: "vov-gt-hcm",
+    name: "VOV Giao Thông TP.HCM",
+    description: "Kênh VOV Giao Thông khu vực TP.HCM.",
+    page_url: "https://vovgiaothong.vn/",
+    stream_url: "https://stream.mediatech.vn/vovgt-hcm"
+  }
+];
+
+server.registerTool(
+  "get_radio_channels",
+  {
+    title: "Danh sách kênh radio Việt Nam",
+    description:
+      "Trả về danh sách các kênh radio (VOV, VOV Giao Thông...) kèm play_url để client có thể tự phát.",
+    inputSchema: {
+      id: z
+        .string()
+        .optional()
+        .describe("ID kênh radio (vov1, vov-gt-hn, vov-gt-hcm). Bỏ trống để lấy tất cả.")
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      channels: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            description: z.string().optional(),
+            page_url: z.string(),
+            stream_url: z.string().optional(),
+            play_url: z.string().optional()
+          })
+        )
+        .optional()
+    }
+  },
+  async ({ id }) => {
+    let channels = RADIO_CHANNELS;
+
+    if (id) {
+      channels = RADIO_CHANNELS.filter((c) => c.id === id);
+      if (channels.length === 0) {
+        return makeResult({
+          success: false,
+          message: `Không tìm thấy kênh radio với id = ${id}.`
+        });
       }
     }
 
-    const promptForModel = {
-      huong_dan_model:
-        "Hãy dùng tiếng Việt, xưng 'tớ' / 'mình' với trẻ em cho thân thiện. Không chép nguyên văn truyện trên web, chỉ dùng motip làm gợi ý rồi tự sáng tạo.",
-      yeu_cau_nguoi_dung: { topic, style, length },
-      goi_y_tu_rss: storyHints,
-    };
+    const mapped = channels.map((c) => ({
+      ...c,
+      play_url: c.stream_url || c.page_url
+    }));
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(promptForModel, null, 2),
-        },
-      ],
-    };
-  },
+    return makeResult({
+      success: true,
+      message:
+        "Danh sách kênh radio. Nếu client hỗ trợ, hãy dùng 'play_url' hoặc 'stream_url' để phát audio.",
+      channels: mapped
+    });
+  }
 );
 
-// ==============================
-// CHẠY SERVER QUA STDIO
-// ==============================
+/* -------------------------------------------------
+ * 6. TOOL: PODCAST (get_podcast_list)
+ * ------------------------------------------------- */
 
-const transport = new StdioServerTransport({ server });
+const PODCAST_LIST = [
+  {
+    id: "vnexpress-hom-nay",
+    name: "VnExpress Hôm Nay",
+    description: "Podcast tổng hợp tin tức, phân tích thời sự của VnExpress.",
+    page_url: "https://vnexpress.net/podcast/vnexpress-hom-nay",
+    rss_url: "https://vnexpress.net/rss/podcast/vnexpress-hom-nay.rss"
+  },
+  {
+    id: "vnexpress-diem-tin",
+    name: "Điểm Tin - VnExpress",
+    description: "Tóm tắt các tin nóng, quan trọng trong ngày.",
+    page_url: "https://vnexpress.net/podcast/diem-tin",
+    rss_url: "https://vnexpress.net/rss/podcast/diem-tin.rss"
+  }
+];
 
-transport
-  .listen()
-  .then(() => {
-    console.error("viet-assistant-mcp server is running via stdio...");
+server.registerTool(
+  "get_podcast_list",
+  {
+    title: "Danh sách podcast Việt Nam",
+    description:
+      "Trả về danh sách các kênh podcast (hiện tại là VnExpress) kèm play_url để client có thể phát.",
+    inputSchema: {
+      id: z
+        .string()
+        .optional()
+        .describe(
+          "ID podcast (vnexpress-hom-nay, vnexpress-diem-tin). Bỏ trống để lấy tất cả."
+        )
+    },
+    outputSchema: {
+      success: z.boolean(),
+      message: z.string(),
+      podcasts: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            description: z.string().optional(),
+            page_url: z.string(),
+            rss_url: z.string().optional(),
+            play_url: z.string().optional()
+          })
+        )
+        .optional()
+    }
+  },
+  async ({ id }) => {
+    let podcasts = PODCAST_LIST;
+
+    if (id) {
+      podcasts = PODCAST_LIST.filter((p) => p.id === id);
+      if (podcasts.length === 0) {
+        return makeResult({
+          success: false,
+          message: `Không tìm thấy podcast với id = ${id}.`
+        });
+      }
+    }
+
+    const mapped = podcasts.map((p) => ({
+      ...p,
+      play_url: p.rss_url || p.page_url
+    }));
+
+    return makeResult({
+      success: true,
+      message:
+        "Danh sách podcast. Nếu client hỗ trợ, hãy dùng 'play_url' để phát audio hoặc subscribe RSS.",
+      podcasts: mapped
+    });
+  }
+);
+
+/* -------------------------------------------------
+ * KHỞI ĐỘNG MCP SERVER (HTTP /mcp)
+ * ------------------------------------------------- */
+
+const app = express();
+app.use(express.json());
+
+// Trang test cho / (mở trên trình duyệt)
+app.get("/", (req, res) => {
+  res.send("Viet Assistant MCP server is running. Use POST /mcp for MCP clients.");
+});
+
+// Trang test cho /mcp với GET
+app.get("/mcp", (req, res) => {
+  res.send("MCP endpoint is alive. Clients should use POST /mcp.");
+});
+
+// Endpoint chính cho MCP: POST /mcp
+app.post("/mcp", async (req, res) => {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true
+  });
+
+  res.on("close", () => {
+    transport.close();
+  });
+
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+});
+
+// Lắng nghe
+const port = parseInt(process.env.PORT || "3000", 10);
+app
+  .listen(port, () => {
+    console.log(`Viet Assistant MCP server running at http://localhost:${port}/mcp`);
   })
-  .catch((err) => {
-    console.error("Error starting MCP server:", err);
+  .on("error", (error) => {
+    console.error("Server error:", error);
     process.exit(1);
   });
