@@ -1,0 +1,14 @@
+{
+  "name": "viet-assistant-mcp",
+  "version": "1.0.0",
+  "description": "MCP server tong hop tin tuc, ty gia, gia vang, crypto, xo so, ke chuyen",
+  "main": "index.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "xml2js": "^0.6.2"
+  }
+}
