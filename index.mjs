@@ -223,4 +223,139 @@ server.tool(
         const vs = "usd,vnd";
         const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=${vs}`;
         const data = await fetchJson(url);
-        output.crypto = d
+        output.crypto = data;
+      } catch (err) {
+        output.crypto = {
+          error: "Không lấy được giá crypto (có thể do giới hạn hoặc thay đổi API).",
+          detail: String(err),
+        };
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              note:
+                "Model hãy tóm tắt lại cho người dùng bằng tiếng Việt: tỷ giá (nhất là VND), và giá BTC/ETH/USDT. Với vàng thì giải thích là chưa có số liệu realtime.",
+              data: output,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  },
+);
+
+// -------------------------------------------------
+// TOOL 3: KQXS Miền Nam
+// -------------------------------------------------
+
+server.tool(
+  "lottery_south_history",
+  "Đọc kết quả xổ số Miền Nam trong một số ngày gần đây dựa trên RSS.",
+  {
+    inputSchema: z
+      .object({
+        days: z.number().int().min(1).max(7).default(7),
+      })
+      .describe("Số ngày gần đây muốn lấy, tối đa 7."),
+  },
+  async ({ input }) => {
+    const { days } = input;
+
+    const items = await fetchRssItems(LOTTERY_RSS_SOUTH, days);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              note:
+                "Các bản tin kết quả xổ số Miền Nam lấy từ RSS. Model hãy đọc lại cho người dùng theo yêu cầu (đài nào, ngày nào, giải đặc biệt...).",
+              rssUrl: LOTTERY_RSS_SOUTH,
+              items,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
+    };
+  },
+);
+
+// -------------------------------------------------
+// TOOL 4: Kể chuyện
+// -------------------------------------------------
+
+server.tool(
+  "story_mix",
+  "Kể chuyện cổ tích / thiếu nhi / truyện sáng tạo theo chủ đề người dùng yêu cầu.",
+  {
+    inputSchema: z
+      .object({
+        topic: z
+          .string()
+          .describe("Chủ đề / nhân vật chính (vd: 'cậu bé bán trà sữa robot')."),
+        style: z
+          .enum(["co_tich_viet_nam", "thieu_nhi_hai_huoc", "suy_ngam_cam_dong", "ngau_nhien"])
+          .default("co_tich_viet_nam"),
+        length: z.enum(["rat_ngan", "ngan", "vua", "dai"]).default("vua"),
+      })
+      .describe("Thông tin để tạo truyện."),
+  },
+  async ({ input }) => {
+    const { topic, style, length } = input;
+
+    const storyHints = [];
+    for (const url of STORY_SOURCES) {
+      try {
+        const items = await fetchRssItems(url, 2);
+        storyHints.push({
+          source: url,
+          titles: items.map((it) => it.title),
+        });
+      } catch {
+        // bỏ qua nếu lỗi
+      }
+    }
+
+    const promptForModel = {
+      huong_dan_model:
+        "Hãy dùng tiếng Việt, xưng 'tớ' / 'mình' với trẻ em cho thân thiện. Không chép nguyên văn truyện trên web, chỉ dùng motip làm gợi ý rồi tự sáng tạo.",
+      yeu_cau_nguoi_dung: { topic, style, length },
+      goi_y_tu_rss: storyHints,
+    };
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(promptForModel, null, 2),
+        },
+      ],
+    };
+  },
+);
+
+// ==============================
+// CHẠY SERVER QUA STDIO
+// ==============================
+
+const transport = new StdioServerTransport({ server });
+
+transport
+  .listen()
+  .then(() => {
+    console.error("viet-assistant-mcp server is running via stdio...");
+  })
+  .catch((err) => {
+    console.error("Error starting MCP server:", err);
+    process.exit(1);
+  });
