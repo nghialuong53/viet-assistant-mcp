@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
-// LƯU Ý: Chỉ import từ root SDK, không dùng đường dẫn dist/server nữa
-import { McpServer, StdioServerTransport } from "@modelcontextprotocol/sdk";
-import { z } from "@modelcontextprotocol/sdk/zod.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/stdio";
+import { z } from "@modelcontextprotocol/sdk/zod";
 import { parseStringPromise } from "xml2js";
+
 
 // ==============================
 // CẤU HÌNH NGUỒN DỮ LIỆU
