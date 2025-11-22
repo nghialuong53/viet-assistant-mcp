@@ -1,7 +1,7 @@
 {
-  "name": "viet-assistant-mcp",
+  "name": "viet-story-mcp",
   "version": "1.0.0",
-  "description": "MCP server gom 4 tien ich: tin tuc, gia vang/ty gia/coin, xo so mien nam, nguon ke chuyen.",
+  "description": "MCP chỉ có 1 tiện ích kể chuyện Việt Nam.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
@@ -10,7 +10,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "express": "^4.21.0",
-    "fast-xml-parser": "^4.5.0",
+    "node-fetch": "^3.3.2",
     "zod": "^3.25.0"
   }
 }
