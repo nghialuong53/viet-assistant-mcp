@@ -1,17 +1,14 @@
 {
   "name": "vn-radio-mcp",
   "version": "1.0.0",
-  "description": "MCP server phát radio Việt Nam.",
+  "description": "MCP server phát các kênh radio Việt Nam cho robot AI (STDIO).",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
-    "start:stdio": "node index.mjs stdio",
-    "start:http": "node index.mjs http",
-    "start": "node index.mjs http"
+    "start": "node index.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "express": "^4.21.0",
     "zod": "^3.25.0"
   }
 }
