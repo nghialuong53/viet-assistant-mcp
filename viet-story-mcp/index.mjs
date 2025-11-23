@@ -1,8 +1,8 @@
 // index.mjs
-// MCP server: kể chuyện Việt Nam (1 tiện ích duy nhất)
+// MCP server: kể chuyện Việt Nam (1 tiện ích duy nhất, ổn định hơn)
 
 import express from "express";
-import fetch from "node-fetch";
+import Parser from "rss-parser";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -12,7 +12,7 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "viet-story-mcp",
-  version: "1.0.0"
+  version: "1.0.1"
 });
 
 function makeResult(output) {
@@ -23,8 +23,14 @@ function makeResult(output) {
 }
 
 // ----------------------
-// NGUỒN TRUYỆN VIỆT NAM
+// RSS PARSER + NGUỒN TRUYỆN VIỆT NAM
 // ----------------------
+
+// Dùng rss-parser đọc RSS chuẩn, ít lỗi hơn regex thủ công
+const rss = new Parser({
+  headers: { "User-Agent": "VN-Story-MCP" }
+});
+
 const SOURCES = [
   "https://vnexpress.net/rss/giai-tri.rss",
   "https://zingnews.vn/rss/van-hoa.rss",
@@ -32,6 +38,28 @@ const SOURCES = [
   "https://dantri.com.vn/rss/van-hoa.rss",
   "https://tuoitre.vn/rss/van-hoa.rss"
 ];
+
+// Hàm tiện ích: bỏ tag HTML, gom khoảng trắng
+function stripHtml(html = "") {
+  return html
+    .replace(/<[^>]+>/g, " ") // bỏ tất cả thẻ <tag>
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Chia text thành các đoạn maxLen ký tự, bỏ đoạn rỗng
+function splitToParts(text, maxLen = 800) {
+  if (!text) return [];
+  const parts = [];
+  let i = 0;
+  while (i < text.length) {
+    parts.push(text.slice(i, i + maxLen));
+    i += maxLen;
+  }
+  return parts.filter((p) => p.trim().length > 0);
+}
 
 // ----------------------
 // TOOL: get_vietnamese_stories
@@ -41,7 +69,7 @@ server.registerTool(
   {
     title: "Kể chuyện Việt Nam",
     description:
-      "Tự động lấy truyện ngắn, cổ tích hoặc truyện giải trí từ các trang báo Việt Nam và chia thành nhiều phần nếu dài.",
+      "Tự động lấy truyện ngắn, cổ tích hoặc truyện giải trí từ các trang báo Việt Nam. Nội dung được làm sạch HTML và chia thành nhiều phần nếu dài.",
     inputSchema: {
       topic: z
         .string()
@@ -57,7 +85,7 @@ server.registerTool(
             title: z.string(),
             description: z.string().optional(),
             link: z.string(),
-            content: z.array(z.string()).optional() // các phần của truyện
+            content: z.array(z.string()).optional() // các phần của truyện (text sạch)
           })
         )
         .optional()
@@ -65,48 +93,79 @@ server.registerTool(
   },
   async ({ topic }) => {
     const results = [];
+    const topicLower = topic ? topic.toLowerCase() : null;
+
+    // Dùng Set để tránh trùng tiêu đề giữa các báo
+    const seenTitles = new Set();
 
     for (const url of SOURCES) {
       try {
-        const res = await fetch(url);
-        const xml = await res.text();
+        const feed = await rss.parseURL(url);
+        const items = feed.items || [];
 
-        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)];
+        // Mỗi nguồn lấy tối đa 3 truyện
         for (const item of items.slice(0, 3)) {
-          const title = item[1].match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1] || "Không có tiêu đề";
-          const link = item[1].match(/<link>(.*?)<\/link>/)?.[1] || "";
-          const desc = item[1].match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1] || "";
+          const title = (item.title || "Không có tiêu đề").trim();
+          const link = (item.link || "").trim();
 
-          // Nếu có chủ đề, lọc
-          if (topic && !title.toLowerCase().includes(topic.toLowerCase()) && !desc.toLowerCase().includes(topic.toLowerCase())) {
+          // Nội dung ngắn ưu tiên: content:encoded -> content -> snippet
+          const raw =
+            item["content:encoded"] ||
+            item.content ||
+            item.contentSnippet ||
+            "";
+
+          const text = stripHtml(raw);
+
+          // Bỏ qua nếu không có nội dung
+          if (!text) continue;
+
+          // Lọc theo chủ đề nếu có
+          if (
+            topicLower &&
+            !title.toLowerCase().includes(topicLower) &&
+            !text.toLowerCase().includes(topicLower)
+          ) {
             continue;
           }
 
-          // Chia truyện dài thành từng phần (mỗi 700 ký tự)
-          const parts = desc.length > 700 ? desc.match(/.{1,700}/g) : [desc];
+          // Tránh truyện trùng tiêu đề
+          const normTitle = title.toLowerCase();
+          if (seenTitles.has(normTitle)) continue;
+          seenTitles.add(normTitle);
+
+          // Chia truyện dài thành từng phần ~800 ký tự
+          const parts = splitToParts(text, 800);
+
+          // Mô tả ngắn gửi cho robot để giới thiệu
+          const shortDesc =
+            text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
 
           results.push({
             title,
-            description: desc.slice(0, 120) + "...",
+            description: shortDesc,
             link,
             content: parts
           });
         }
       } catch (err) {
-        console.error("Lỗi đọc RSS:", err.message);
+        console.error("Lỗi đọc RSS từ", url, ":", err.message);
+        // Không throw ra ngoài để tránh làm hỏng toàn bộ response
       }
     }
 
     if (results.length === 0) {
       return makeResult({
         success: false,
-        message: "Không tìm thấy truyện nào phù hợp, hãy thử lại với chủ đề khác (ví dụ: cổ tích, hài hước, tình cảm...)"
+        message:
+          "Không tìm thấy truyện nào phù hợp. Hãy thử lại với chủ đề khác (ví dụ: cổ tích, hài hước, tình cảm...)"
       });
     }
 
     return makeResult({
       success: true,
-      message: "Các truyện Việt Nam được tìm thấy. Mỗi truyện có thể chia thành nhiều phần nếu dài.",
+      message:
+        "Các truyện Việt Nam đã được tìm thấy. Mỗi truyện đã được làm sạch HTML và chia thành nhiều phần nếu dài.",
       stories: results
     });
   }
