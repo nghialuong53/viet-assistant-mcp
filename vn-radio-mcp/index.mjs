@@ -12,7 +12,7 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "vn-radio-mcp",
-  version: "1.0.0"
+  version: "1.0.1"
 });
 
 // Hàm trả kết quả chuẩn MCP
@@ -31,7 +31,6 @@ function makeResult(output) {
 // ----------------------
 // DỮ LIỆU CÁC KÊNH RADIO
 // ----------------------
-// Anh có thể thêm / sửa kênh sau này, chỉ cần giữ nguyên cấu trúc.
 const RADIO_CHANNELS = [
   {
     id: "vov1",
@@ -70,7 +69,6 @@ const RADIO_CHANNELS = [
 // ----------------------
 // TOOL 1: list_vn_radio
 // ----------------------
-// Liệt kê danh sách kênh radio, có thể lọc theo id.
 server.registerTool(
   "list_vn_radio",
   {
@@ -117,7 +115,6 @@ server.registerTool(
 
     const mapped = channels.map((c) => ({
       ...c,
-      // play_url: để robot dùng làm URL phát audio (ưu tiên stream_url)
       play_url: c.stream_url || c.page_url
     }));
 
@@ -133,7 +130,6 @@ server.registerTool(
 // ----------------------
 // TOOL 2: get_radio_stream
 // ----------------------
-// Lấy trực tiếp stream_url của 1 kênh (dùng khi đã biết id).
 server.registerTool(
   "get_radio_stream",
   {
@@ -183,9 +179,7 @@ server.registerTool(
 // ----------------------
 async function main() {
   const transport = new StdioServerTransport();
-
-  await server.connect(transport);
-  await transport.start();
+  await server.connect(transport); // KHÔNG GỌI transport.start() nữa
 }
 
 main().catch((err) => {
