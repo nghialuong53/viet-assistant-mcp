@@ -1,19 +1,21 @@
 // index.mjs
-// MCP server: Radio Việt Nam (2 tool)
+// MCP server: chỉ phát các kênh radio Việt Nam (STDIO)
 
-import express from "express";
+// Yêu cầu: Node >= 18
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-/* ------------------------------------------------
- * TẠO MCP SERVER
- * ------------------------------------------------ */
+// ----------------------
+// TẠO MCP SERVER
+// ----------------------
 const server = new McpServer({
   name: "vn-radio-mcp",
   version: "1.0.0"
 });
 
+// Hàm trả kết quả chuẩn MCP
 function makeResult(output) {
   return {
     content: [
@@ -26,80 +28,61 @@ function makeResult(output) {
   };
 }
 
-/* ------------------------------------------------
- * DANH SÁCH CÁC KÊNH RADIO
- * (anh muốn thì sau này chỉ cần thêm bớt ở đây)
- * ------------------------------------------------ */
+// ----------------------
+// DỮ LIỆU CÁC KÊNH RADIO
+// ----------------------
+// Anh có thể thêm / sửa kênh sau này, chỉ cần giữ nguyên cấu trúc.
 const RADIO_CHANNELS = [
   {
     id: "vov1",
     name: "VOV1 - Thời sự Chính trị Tổng hợp",
-    region: "toan-quoc",
     description:
       "Kênh thời sự, chính trị, tổng hợp của Đài Tiếng nói Việt Nam.",
-    stream_url: "https://stream.mediatech.vn/vov1",
-    homepage: "https://vov1.vov.gov.vn/"
+    page_url: "https://vov1.vov.gov.vn/",
+    stream_url: "https://stream.mediatech.vn/vov1"
   },
   {
     id: "vov-gt-hn",
     name: "VOV Giao Thông Hà Nội",
-    region: "mien-bac",
     description:
-      "Kênh VOV Giao Thông FM 91MHz – tin giao thông, đời sống đô thị khu vực Hà Nội.",
-    stream_url: "https://stream.mediatech.vn/vovgt-hn",
-    homepage: "https://vovgiaothong.vn/"
+      "VOV Giao Thông FM 91MHz – tin giao thông, đời sống đô thị Hà Nội.",
+    page_url: "https://vovgiaothong.vn/",
+    stream_url: "https://stream.mediatech.vn/vovgt-hn"
   },
   {
     id: "vov-gt-hcm",
     name: "VOV Giao Thông TP.HCM",
-    region: "mien-nam",
     description:
-      "Kênh VOV Giao Thông FM 91MHz – khu vực TP.HCM và lân cận.",
-    stream_url: "https://stream.mediatech.vn/vovgt-hcm",
-    homepage: "https://vovgiaothong.vn/"
+      "VOV Giao Thông khu vực TP.HCM, thông tin giao thông, đời sống đô thị.",
+    page_url: "https://vovgiaothong.vn/",
+    stream_url: "https://stream.mediatech.vn/vovgt-hcm"
   },
   {
-    id: "voh-fm99-9",
-    name: "VOH FM 99.9 MHz",
-    region: "mien-nam",
+    id: "vov3",
+    name: "VOV3 - Âm nhạc Giải trí",
     description:
-      "Đài Tiếng nói Nhân dân TP.HCM – chương trình tổng hợp, giải trí, thông tin.",
-    stream_url: "https://strm.voh.com.vn/fm99-9",
-    homepage: "https://voh.com.vn/"
-  },
-  {
-    id: "bbc-vietnamese",
-    name: "BBC Tiếng Việt (podcast / radio)",
-    region: "quoc-te",
-    description:
-      "Tin tức và phân tích của BBC Tiếng Việt (thường phát dạng podcast/audio).",
-    stream_url: "https://podcasts.files.bbci.co.uk/p02pc9qm.rss",
-    homepage: "https://www.bbc.com/vietnamese"
+      "Kênh âm nhạc, giải trí của Đài Tiếng nói Việt Nam (thích hợp bật nhạc).",
+    page_url: "https://vov3.vov.gov.vn/",
+    stream_url: "https://stream.mediatech.vn/vov3"
   }
 ];
 
-/* ------------------------------------------------
- * TOOL 1: list_vn_radio
- * - Liệt kê các kênh, có thể lọc theo vùng hoặc từ khóa
- * ------------------------------------------------ */
+// ----------------------
+// TOOL 1: list_vn_radio
+// ----------------------
+// Liệt kê danh sách kênh radio, có thể lọc theo id.
 server.registerTool(
   "list_vn_radio",
   {
     title: "Danh sách kênh radio Việt Nam",
     description:
-      "Trả về danh sách kênh radio Việt Nam (VOV, VOH, BBC tiếng Việt...). Có thể lọc theo vùng hoặc từ khóa.",
+      "Trả về danh sách các kênh radio Việt Nam (VOV, VOV Giao Thông...). Nếu truyền id thì chỉ trả về một kênh.",
     inputSchema: {
-      region: z
+      id: z
         .string()
         .optional()
         .describe(
-          "Vùng miền muốn lọc: 'toan-quoc', 'mien-bac', 'mien-nam', 'quoc-te'. Bỏ trống để lấy tất cả."
-        ),
-      search: z
-        .string()
-        .optional()
-        .describe(
-          "Từ khóa tìm kiếm trong tên kênh, ví dụ: 'giao thông', 'VOV', 'BBC'..."
+          "ID kênh (ví dụ: vov1, vov-gt-hn, vov-gt-hcm, vov3). Bỏ trống để lấy tất cả."
         )
     },
     outputSchema: {
@@ -111,152 +94,101 @@ server.registerTool(
             id: z.string(),
             name: z.string(),
             description: z.string().optional(),
-            region: z.string().optional(),
+            page_url: z.string().optional(),
             stream_url: z.string().optional(),
-            homepage: z.string().optional(),
-            // play_url: gợi ý cho robot dùng để phát
             play_url: z.string().optional()
           })
         )
         .optional()
     }
   },
-  async ({ region, search }) => {
-    let list = RADIO_CHANNELS;
+  async ({ id }) => {
+    let channels = RADIO_CHANNELS;
 
-    if (region) {
-      const r = region.toLowerCase();
-      list = list.filter(
-        (c) => (c.region || "").toLowerCase() === r
-      );
+    if (id) {
+      channels = RADIO_CHANNELS.filter((c) => c.id === id);
+      if (channels.length === 0) {
+        return makeResult({
+          success: false,
+          message: `Không tìm thấy kênh radio với id = ${id}.`
+        });
+      }
     }
 
-    if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.description || "").toLowerCase().includes(q)
-      );
-    }
-
-    if (list.length === 0) {
-      return makeResult({
-        success: false,
-        message:
-          "Không tìm thấy kênh radio phù hợp với điều kiện lọc. Hãy thử lại với từ khóa hoặc vùng miền khác.",
-        channels: []
-      });
-    }
-
-    const mapped = list.map((c) => ({
+    const mapped = channels.map((c) => ({
       ...c,
-      play_url: c.stream_url || c.homepage
+      // play_url: để robot dùng làm URL phát audio (ưu tiên stream_url)
+      play_url: c.stream_url || c.page_url
     }));
 
     return makeResult({
       success: true,
       message:
-        "Danh sách kênh radio Việt Nam. Hãy chọn 1 kênh (dựa trên 'id' hoặc 'name'), rồi gọi tool 'get_radio_stream' để lấy URL phát.",
+        "Danh sách kênh radio Việt Nam. Hãy dùng 'play_url' hoặc 'stream_url' để robot phát audio.",
       channels: mapped
     });
   }
 );
 
-/* ------------------------------------------------
- * TOOL 2: get_radio_stream
- * - Lấy URL phát cho 1 kênh (để robot gọi API audio)
- * ------------------------------------------------ */
+// ----------------------
+// TOOL 2: get_radio_stream
+// ----------------------
+// Lấy trực tiếp stream_url của 1 kênh (dùng khi đã biết id).
 server.registerTool(
   "get_radio_stream",
   {
-    title: "Lấy URL phát trực tiếp của 1 kênh radio",
+    title: "Lấy URL stream radio Việt Nam",
     description:
-      "Nhận id kênh radio và trả về play_url/stream_url để client phát nhạc.",
+      "Nhận id kênh radio và trả về URL stream để robot có thể mở trực tiếp.",
     inputSchema: {
       id: z
         .string()
         .describe(
-          "ID kênh radio, ví dụ: 'vov1', 'vov-gt-hn', 'vov-gt-hcm', 'voh-fm99-9', 'bbc-vietnamese'."
+          "ID kênh radio (ví dụ: vov1, vov-gt-hn, vov-gt-hcm, vov3)."
         )
     },
     outputSchema: {
       success: z.boolean(),
       message: z.string(),
-      channel: z
-        .object({
-          id: z.string(),
-          name: z.string(),
-          description: z.string().optional(),
-          region: z.string().optional(),
-          stream_url: z.string().optional(),
-          homepage: z.string().optional(),
-          play_url: z.string().optional()
-        })
-        .optional()
+      id: z.string().optional(),
+      name: z.string().optional(),
+      stream_url: z.string().optional(),
+      play_url: z.string().optional()
     }
   },
   async ({ id }) => {
-    const channel = RADIO_CHANNELS.find((c) => c.id === id);
+    const ch = RADIO_CHANNELS.find((c) => c.id === id);
 
-    if (!channel) {
+    if (!ch) {
       return makeResult({
         success: false,
-        message: `Không tìm thấy kênh radio với id = '${id}'. Hãy gọi 'list_vn_radio' để xem danh sách kênh hợp lệ.`
+        message: `Không tìm thấy kênh radio với id = ${id}.`
       });
     }
-
-    const result = {
-      ...channel,
-      play_url: channel.stream_url || channel.homepage
-    };
 
     return makeResult({
       success: true,
       message:
-        "Đây là thông tin kênh radio. Client nên dùng 'play_url' hoặc 'stream_url' để phát audio.",
-      channel: result
+        "Đã lấy được URL stream. Hãy đưa 'play_url' / 'stream_url' cho robot để phát.",
+      id: ch.id,
+      name: ch.name,
+      stream_url: ch.stream_url,
+      play_url: ch.stream_url || ch.page_url
     });
   }
 );
 
-/* ------------------------------------------------
- * KHỞI ĐỘNG MCP SERVER (HTTP /mcp)
- * ------------------------------------------------ */
-const app = express();
-app.use(express.json());
-
-app.get("/", (req, res) => {
-  res.send(
-    "VN Radio MCP server is running. Use POST /mcp for MCP clients."
-  );
-});
-
-app.get("/mcp", (req, res) => {
-  res.send("MCP endpoint active. Clients should use POST /mcp.");
-});
-
-app.post("/mcp", async (req, res) => {
-  const transport = new StreamableHTTPServerTransport({
-    enableJsonResponse: true
-  });
-
-  res.on("close", () => {
-    transport.close();
-  });
+// ----------------------
+// KHỞI ĐỘNG MCP (STDIO)
+// ----------------------
+async function main() {
+  const transport = new StdioServerTransport();
 
   await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
-});
+  await transport.start();
+}
 
-const port = parseInt(process.env.PORT || "3000", 10);
-app
-  .listen(port, () => {
-    console.log(
-      `VN Radio MCP server running at http://localhost:${port}/mcp`
-    );
-  })
-  .on("error", (error) => {
-    console.error("Server error:", error);
-    process.exit(1);
-  });
+main().catch((err) => {
+  console.error("Lỗi MCP server:", err);
+  process.exit(1);
+});
