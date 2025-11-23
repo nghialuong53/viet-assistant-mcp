@@ -1,0 +1,16 @@
+{
+  "name": "viet-story-mcp",
+  "version": "1.0.1",
+  "description": "MCP kể chuyện + tin tức Việt Nam & BBC.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.21.0",
+    "zod": "^3.25.0",
+    "rss-parser": "^3.13.0"
+  }
+}
