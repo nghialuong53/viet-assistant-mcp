@@ -1,11 +1,13 @@
 {
   "name": "vn-radio-mcp",
   "version": "1.0.0",
-  "description": "MCP server phat cac kenh radio Viet Nam cho robot AI.",
+  "description": "MCP server phát radio Việt Nam.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
-    "start": "node index.mjs"
+    "start:stdio": "node index.mjs stdio",
+    "start:http": "node index.mjs http",
+    "start": "node index.mjs http"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
