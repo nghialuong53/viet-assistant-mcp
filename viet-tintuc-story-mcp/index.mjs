@@ -1,5 +1,5 @@
 // index.mjs
-// MCP server: 1) Kể chuyện Việt Nam  2) Tin tức Việt Nam & BBC theo chủ đề
+// MCP server: 1) Tin tức Việt Nam & thế giới  2) Kể truyện tiếng Việt
 
 import express from "express";
 import Parser from "rss-parser";
@@ -11,8 +11,8 @@ import { z } from "zod";
 // TẠO MCP SERVER
 // ----------------------
 const server = new McpServer({
-  name: "viet-story-mcp",
-  version: "1.2.0" // bump version cho dễ phân biệt
+  name: "vn-news-story-mcp",
+  version: "1.0.0"
 });
 
 function makeResult(output) {
@@ -26,15 +26,19 @@ function makeResult(output) {
 // RSS PARSER DÙNG CHUNG
 // ----------------------
 const rss = new Parser({
-  headers: { "User-Agent": "VN-Story-News-MCP" }
+  headers: { "User-Agent": "VN-News-Story-MCP" }
 });
 
-// Hàm tiện ích: bỏ tag HTML, gom khoảng trắng
+// ----------------------
+// TIỆN ÍCH: LÀM SẠCH HTML + CHIA ĐOẠN
+// ----------------------
+
+// Bỏ HTML, chỉ giữ text sạch
 function stripHtml(html = "") {
   return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ") // bỏ script
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ") // bỏ style
-    .replace(/<[^>]+>/g, " ") // bỏ mọi thẻ HTML còn lại
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
@@ -43,7 +47,7 @@ function stripHtml(html = "") {
     .trim();
 }
 
-// Chia text thành các đoạn maxLen ký tự, cố gắng cắt theo câu, bỏ đoạn rỗng
+// Chia text thành các đoạn ~maxLen ký tự, cố gắng cắt theo câu, bỏ đoạn rỗng
 function splitToParts(text, maxLen = 800) {
   if (!text) return [];
   const parts = [];
@@ -52,7 +56,7 @@ function splitToParts(text, maxLen = 800) {
   while (remaining.length > maxLen) {
     let slice = remaining.slice(0, maxLen);
 
-    // Cố gắng cắt ở dấu chấm / xuống dòng gần cuối, hạn chế cắt giữa câu
+    // Cắt ở dấu . ! ? hoặc xuống dòng gần cuối, nếu không có thì cắt cứng
     let cutIndex = Math.max(
       slice.lastIndexOf(". "),
       slice.lastIndexOf("! "),
@@ -60,7 +64,6 @@ function splitToParts(text, maxLen = 800) {
       slice.lastIndexOf("\n")
     );
     if (cutIndex < maxLen * 0.4) {
-      // nếu không tìm được điểm cắt hợp lý thì cứ cắt cứng
       cutIndex = maxLen;
     }
 
@@ -71,21 +74,21 @@ function splitToParts(text, maxLen = 800) {
   }
 
   if (remaining.length > 0) parts.push(remaining);
+
   return parts.filter((p) => p.trim().length > 0);
 }
 
 /* =================================================
- * 1) TOOL KỂ CHUYỆN VIỆT NAM
+ * 1) TRUYỆN TIẾNG VIỆT – get_vietnamese_stories
  * ================================================= */
 
-// Thêm một số nguồn văn hóa / giải trí lâu năm, giữ nguyên các nguồn cũ
+// Các nguồn văn hóa / giải trí lâu năm
 const STORY_SOURCES = [
   "https://vnexpress.net/rss/giai-tri.rss",
   "https://zingnews.vn/rss/van-hoa.rss",
   "https://baomoi.com/rss/giai-tri.rss",
   "https://dantri.com.vn/rss/van-hoa.rss",
   "https://tuoitre.vn/rss/van-hoa.rss",
-  // thêm vài báo lâu năm (nếu RSS lỗi sẽ bị catch, không làm rớt tool)
   "https://laodong.vn/rss/van-hoa-giai-tri.rss",
   "https://vov.vn/rss/van-hoa.rss"
 ];
@@ -93,15 +96,15 @@ const STORY_SOURCES = [
 server.registerTool(
   "get_vietnamese_stories",
   {
-    title: "Kể chuyện Việt Nam",
+    title: "Kể truyện tiếng Việt",
     description:
-      "Tự động lấy truyện ngắn, cổ tích hoặc truyện giải trí từ các trang báo Việt Nam. Nội dung được làm sạch HTML và chia thành nhiều phần nếu dài.",
+      "Lấy truyện / bài viết văn hóa – giải trí tiếng Việt từ nhiều báo lớn. Làm sạch HTML, chia thành nhiều đoạn ~800 ký tự cho TTS đọc mượt.",
     inputSchema: {
       topic: z
         .string()
         .optional()
         .describe(
-          "Chủ đề muốn nghe (ví dụ: cổ tích, hài hước, tình cảm, nhân quả...)"
+          "Chủ đề truyện, ví dụ: 'cổ tích', 'nhân quả', 'hài hước', 'tình cảm', 'gia đình'..."
         )
     },
     outputSchema: {
@@ -111,39 +114,40 @@ server.registerTool(
         .array(
           z.object({
             title: z.string(),
-            description: z.string().optional(),
+            description: z.string().optional(), // mô tả ngắn
             link: z.string(),
-            content: z.array(z.string()).optional() // các phần của truyện (text sạch)
+            content: z.array(z.string()) // các phần truyện đã chia
           })
         )
         .optional()
     }
   },
   async ({ topic }) => {
-    const results = [];
     const topicLower = topic ? topic.toLowerCase() : null;
-
-    // chống trùng truyện giữa các báo: key = link || title
-    const seenStoryKeys = new Set();
+    const results = [];
+    const seenKeys = new Set(); // chống trùng giữa các báo
 
     for (const url of STORY_SOURCES) {
       try {
         const feed = await rss.parseURL(url);
         const items = feed.items || [];
 
-        for (const item of items.slice(0, 3)) {
-          const title = (item.title || "Không có tiêu đề").trim();
+        // Không cần quá nhiều, lấy khoảng 3–5 bài / nguồn cho nhẹ
+        for (const item of items.slice(0, 5)) {
+          const title = (item.title || "").trim();
           const link = (item.link || "").trim();
+
+          if (!title || !link) continue;
 
           const raw =
             item["content:encoded"] ||
             item.content ||
             item.contentSnippet ||
             "";
-
           const text = stripHtml(raw);
           if (!text) continue;
 
+          // Lọc theo topic trên title + nội dung ngắn
           if (
             topicLower &&
             !title.toLowerCase().includes(topicLower) &&
@@ -152,50 +156,56 @@ server.registerTool(
             continue;
           }
 
+          // chống trùng: key theo link + title
           const key =
-            (link && link.toLowerCase()) || title.toLowerCase() || text.slice(0, 80).toLowerCase();
-          if (seenStoryKeys.has(key)) continue;
-          seenStoryKeys.add(key);
+            link.toLowerCase() +
+            "::" +
+            title.toLowerCase().slice(0, 80);
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
 
           const parts = splitToParts(text, 800);
-          const shortDesc =
-            text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
+          if (!parts.length) continue;
+
+          const desc =
+            text.length > 200 ? text.slice(0, 200).trim() + "..." : text;
 
           results.push({
             title,
-            description: shortDesc,
+            description: desc,
             link,
             content: parts
           });
         }
       } catch (err) {
-        console.error("Lỗi đọc RSS (story) từ", url, ":", err.message);
-        // bỏ qua nguồn lỗi, các nguồn khác vẫn chạy
+        // 1 nguồn lỗi thì log rồi bỏ qua, không làm rớt cả tool
+        console.error("Lỗi đọc RSS truyện từ", url, ":", err.message);
       }
     }
 
-    if (results.length === 0) {
+    if (!results.length) {
       return makeResult({
         success: false,
         message:
-          "Không tìm thấy truyện nào phù hợp. Hãy thử lại với chủ đề khác (ví dụ: cổ tích, hài hước, tình cảm...)"
+          "Không tìm thấy truyện phù hợp với chủ đề hiện tại. Hãy thử chủ đề khác, ví dụ: 'cổ tích', 'hài hước', 'nhân quả', 'tình cảm'...",
+        stories: []
       });
     }
 
     return makeResult({
       success: true,
       message:
-        "Các truyện Việt Nam đã được tìm thấy. Mỗi truyện đã được làm sạch HTML và chia thành nhiều phần nếu dài.",
+        "Đã lấy danh sách truyện tiếng Việt. Mỗi truyện đã được làm sạch HTML và chia thành nhiều phần ~800 ký tự.",
       stories: results
     });
   }
 );
 
 /* =================================================
- * 2) TOOL TIN TỨC VIỆT NAM + BBC THEO CHỦ ĐỀ
+ * 2) TIN TỨC VIỆT NAM & THẾ GIỚI – get_news
  * ================================================= */
 
-// Các nguồn tin tức chính thống VN + BBC (RSS công khai)
+// Các nguồn tin tức chính thống VN + BBC
 const NEWS_SOURCES = [
   {
     id: "vnexpress",
@@ -241,111 +251,114 @@ const NEWS_SOURCES = [
 
 const NEWS_SOURCE_IDS = NEWS_SOURCES.map((s) => s.id);
 
-// Tool: get_news – vừa liệt kê tiêu đề, vừa đọc nội dung bài
+// Tool đọc / liệt kê tin tức
 server.registerTool(
   "get_news",
   {
-    title: "Tin tức Việt Nam & BBC theo chủ đề",
+    title: "Tin tức Việt Nam & thế giới",
     description:
-      "Lấy danh sách tiêu đề tin tức theo chủ đề (chính trị, bóng đá, tin thế giới, kinh tế, công nghệ...). Có 2 chế độ: 'list' (trả về danh sách tiêu đề) và 'article' (đọc nội dung ngắn gọn của 1 bài báo từ RSS).",
+      "Lấy tin tức Việt Nam & BBC theo chủ đề. Có 2 mode: 'list' (danh sách tiêu đề 1,2,3,4...) và 'article' (đọc nội dung 1 bài, chia đoạn ~800 ký tự). Sử dụng rss-parser, không crawl HTML.",
     inputSchema: {
       mode: z
         .enum(["list", "article"])
         .default("list")
         .describe(
-          "Chế độ: 'list' = lấy danh sách tiêu đề; 'article' = đọc nội dung 1 bài (từ RSS, không dùng node-fetch)."
+          "Mode: 'list' = lấy danh sách tiêu đề; 'article' = đọc nội dung 1 bài."
         ),
       topic: z
         .string()
         .optional()
         .describe(
-          "Chủ đề tin tức, ví dụ: 'chính trị', 'bóng đá', 'tin thế giới', 'kinh tế', 'công nghệ'... (dùng cho mode='list')."
+          "Chủ đề tin tức, ví dụ: 'chính trị', 'bóng đá', 'công nghệ', 'kinh tế', 'sức khỏe', 'tin thế giới'..."
         ),
       url: z
         .string()
         .url()
         .optional()
         .describe(
-          "Đường link bài báo cần đọc (dùng cho mode='article', nên dùng link lấy từ mode='list')."
+          "Link bài báo cần đọc nội dung (dùng cho mode='article', nên lấy từ kết quả mode='list')."
         ),
       sourceId: z
         .enum(NEWS_SOURCE_IDS)
         .optional()
         .describe(
-          "Mã nguồn tin của bài báo (ví dụ: 'vnexpress', 'tuoitre'...). Nên truyền để tool tìm bài nhanh và ổn định hơn (dùng cho mode='article')."
+          "Mã nguồn báo, ví dụ: 'vnexpress', 'tuoitre'... (dùng cho mode='article' để tìm nhanh và ổn định hơn)."
         ),
       sources: z
         .array(z.enum(NEWS_SOURCE_IDS))
         .optional()
-        .describe("Danh sách nguồn tin muốn lấy. Bỏ trống = dùng tất cả."),
+        .describe(
+          "Danh sách nguồn báo muốn dùng. Bỏ trống = dùng tất cả nguồn."
+        ),
       limit: z
         .number()
         .int()
         .min(1)
         .max(30)
         .default(10)
-        .describe("Số lượng bài tối đa (cho mode='list').")
+        .describe("Số lượng bài tối đa khi lấy danh sách (list).")
     },
     outputSchema: {
       success: z.boolean(),
       message: z.string(),
-      // Kết quả cho mode = list
+      // Mode = list
       articles: z
         .array(
           z.object({
-            id: z.number(),
+            id: z.number(), // số thứ tự 1,2,3,4,... để robot đọc
             sourceId: z.string(),
             sourceName: z.string(),
             title: z.string(),
-            summary: z.string().optional(),
+            summary: z.string().optional(), // nội dung ngắn đã làm sạch
             link: z.string(),
             publishedAt: z.string().optional()
           })
         )
         .optional(),
-      // Kết quả cho mode = article
+      // Mode = article
       article: z
         .object({
           sourceId: z.string(),
           sourceName: z.string(),
           title: z.string(),
           link: z.string(),
-          contentParts: z.array(z.string()) // nội dung chia nhỏ cho TTS đọc không bị đứng
+          contentParts: z.array(z.string()) // các đoạn ~800 ký tự, text sạch
         })
         .optional()
     }
   },
-  async ({ mode, topic, url, sources, limit, sourceId }) => {
+  async ({ mode, topic, url, sourceId, sources, limit }) => {
     // --------------------
-    // MODE = "article": đọc 1 bài từ RSS (không dùng node-fetch)
+    // MODE = "article": đọc nội dung 1 bài từ RSS
     // --------------------
     if (mode === "article") {
       if (!url) {
         return makeResult({
           success: false,
-          message: "Mode = 'article' nhưng không có 'url' bài báo."
+          message:
+            "Mode = 'article' nhưng không có 'url' bài báo. Hãy truyền đúng link lấy từ kết quả 'list'."
         });
       }
 
       const targetUrl = url.trim();
       let src = null;
 
-      // Nếu client truyền sourceId thì ưu tiên dùng
+      // Ưu tiên sourceId nếu có
       if (sourceId) {
         src = NEWS_SOURCES.find((s) => s.id === sourceId) || null;
       }
 
-      // Nếu chưa có, đoán nguồn theo hostname trong URL
+      // Nếu chưa có, đoán nguồn theo hostname của URL
       if (!src) {
         try {
-          const targetHost = new URL(targetUrl).hostname.replace(/^www\./, "");
+          const host = new URL(targetUrl).hostname.replace(/^www\./, "");
           src =
             NEWS_SOURCES.find((s) => {
               const feedHost = new URL(s.rss).hostname.replace(/^www\./, "");
-              return feedHost === targetHost;
+              return feedHost === host;
             }) || null;
         } catch {
-          // nếu URL không parse được thì bỏ qua, để dùng all sources
+          // URL lỗi thì sẽ thử tất cả nguồn
         }
       }
 
@@ -358,11 +371,9 @@ server.registerTool(
         try {
           const feed = await rss.parseURL(s.rss);
           const items = feed.items || [];
-
           const item = items.find((it) => {
             const link = (it.link || "").trim();
             if (!link) return false;
-            // khớp tương đối để tránh khác nhau ?query string
             return (
               targetUrl === link ||
               targetUrl.startsWith(link) ||
@@ -376,8 +387,8 @@ server.registerTool(
             break;
           }
         } catch (err) {
-          console.error("Lỗi đọc RSS (article) từ", s.rss, ":", err.message);
-          // thử nguồn khác, không làm rớt cả tool
+          console.error("Lỗi đọc RSS bài báo từ", s.rss, ":", err.message);
+          // bỏ qua nguồn lỗi, thử nguồn khác
         }
       }
 
@@ -385,7 +396,7 @@ server.registerTool(
         return makeResult({
           success: false,
           message:
-            "Không tìm được nội dung bài này trong RSS của các nguồn đã cấu hình. Hãy chắc chắn dùng link được lấy từ mode='list'."
+            "Không tìm thấy bài báo này trong RSS của các nguồn đã cấu hình. Hãy chắc chắn dùng link lấy từ mode='list'."
         });
       }
 
@@ -396,8 +407,8 @@ server.registerTool(
         "";
       let text = stripHtml(raw);
 
+      // Nếu RSS không có nội dung dài thì dùng title + snippet
       if (!text || text.length < 50) {
-        // Nếu trong RSS không có nội dung đủ dài thì trả nội dung ngắn gọn
         text = stripHtml(
           (foundItem.title || "") +
             ". " +
@@ -405,13 +416,12 @@ server.registerTool(
         );
       }
 
-      const contentParts = splitToParts(text, 800); // ~800 ký tự / phần
-
-      if (contentParts.length === 0) {
+      const contentParts = splitToParts(text, 800);
+      if (!contentParts.length) {
         return makeResult({
           success: false,
           message:
-            "Không trích xuất được nội dung văn bản đủ để đọc từ RSS của bài báo."
+            "Không trích xuất được nội dung văn bản đủ để đọc từ RSS bài báo này."
         });
       }
 
@@ -420,7 +430,7 @@ server.registerTool(
       return makeResult({
         success: true,
         message:
-          "Đã lấy nội dung bài báo từ RSS, làm sạch HTML và chia thành nhiều phần để đọc.",
+          "Đã lấy nội dung bài báo từ RSS, làm sạch HTML và chia thành nhiều phần ~800 ký tự.",
         article: {
           sourceId: usedSource ? usedSource.id : "unknown",
           sourceName: usedSource ? usedSource.name : "Unknown Source",
@@ -432,17 +442,18 @@ server.registerTool(
     }
 
     // --------------------
-    // MODE = "list": liệt kê tiêu đề theo chủ đề
+    // MODE = "list": lấy danh sách tiêu đề tin tức
     // --------------------
     const topicLower = topic ? topic.toLowerCase() : null;
+
     const selectedSources =
-      sources && sources.length > 0
+      sources && sources.length
         ? NEWS_SOURCES.filter((s) => sources.includes(s.id))
         : NEWS_SOURCES;
 
     const articles = [];
     let nextId = 1;
-    const seenArticleKeys = new Set(); // chống trùng bài giữa các báo (theo link)
+    const seenKeys = new Set(); // chống trùng bài giữa các báo (theo link)
 
     for (const src of selectedSources) {
       try {
@@ -454,6 +465,8 @@ server.registerTool(
 
           const title = (item.title || "").trim();
           const link = (item.link || "").trim();
+          if (!title || !link) continue;
+
           const raw =
             item["content:encoded"] ||
             item.content ||
@@ -461,12 +474,7 @@ server.registerTool(
             "";
           const text = stripHtml(raw);
 
-          if (!title || !link) continue;
-
-          const key = link.toLowerCase();
-          if (seenArticleKeys.has(key)) continue;
-          seenArticleKeys.add(key);
-
+          // Lọc theo topic trên title + nội dung ngắn
           if (
             topicLower &&
             !title.toLowerCase().includes(topicLower) &&
@@ -474,6 +482,10 @@ server.registerTool(
           ) {
             continue;
           }
+
+          const key = link.toLowerCase();
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
 
           const summary =
             text.length > 200 ? text.slice(0, 200).trim() + "..." : text;
@@ -489,32 +501,33 @@ server.registerTool(
           });
         }
       } catch (err) {
-        console.error("Lỗi đọc RSS (news) từ", src.rss, ":", err.message);
-        // bỏ qua nguồn lỗi, không làm rớt cả tool
+        console.error("Lỗi đọc RSS tin tức từ", src.rss, ":", err.message);
+        // 1 báo lỗi thì bỏ qua, vẫn tiếp tục với các báo khác
       }
 
       if (articles.length >= limit) break;
     }
 
-    if (articles.length === 0) {
+    if (!articles.length) {
       return makeResult({
         success: false,
         message:
-          "Không tìm thấy bản tin phù hợp với chủ đề. Hãy thử chủ đề khác (ví dụ: 'chính trị', 'bóng đá', 'tin thế giới', 'kinh tế', 'công nghệ'...)."
+          "Không tìm thấy bản tin phù hợp với chủ đề hiện tại. Hãy thử chủ đề khác, ví dụ: 'chính trị', 'bóng đá', 'công nghệ', 'kinh tế', 'sức khỏe', 'tin thế giới'...",
+        articles: []
       });
     }
 
     return makeResult({
       success: true,
       message:
-        "Danh sách tiêu đề tin tức theo chủ đề. Dùng field 'link' (và 'sourceId') để đọc nội dung từng bài qua mode='article'.",
+        "Đã lấy danh sách tin tức. Mỗi bài có id 1,2,3,... để robot đọc theo số thứ tự; kèm link + sourceId để đọc full bài bằng mode='article'.",
       articles
     });
   }
 );
 
 /* =================================================
- * KHỞI ĐỘNG MCP SERVER
+ * KHỞI ĐỘNG MCP SERVER (HTTP + /mcp)
  * ================================================= */
 
 const app = express();
@@ -522,7 +535,7 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send(
-    "Vietnam Story & News MCP server is running. Use POST /mcp for MCP clients."
+    "VN News & Story MCP server is running. Use POST /mcp for MCP clients."
   );
 });
 
@@ -542,7 +555,5 @@ app.post("/mcp", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(
-    `Vietnam Story & News MCP running at http://localhost:${port}/mcp`
-  );
+  console.log(`VN News & Story MCP running at http://localhost:${port}/mcp`);
 });
