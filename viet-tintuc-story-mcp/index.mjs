@@ -1,5 +1,5 @@
 // index.mjs
-// MCP server: 1) Kể chuyện Việt Nam  2) Tin tức Việt Nam & BBC theo chủ đề
+// MCP server: kể chuyện Việt Nam (1 tiện ích duy nhất, ổn định hơn)
 
 import express from "express";
 import Parser from "rss-parser";
@@ -12,7 +12,7 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "viet-story-mcp",
-  version: "1.1.0"
+  version: "1.0.1"
 });
 
 function makeResult(output) {
@@ -23,16 +23,26 @@ function makeResult(output) {
 }
 
 // ----------------------
-// RSS PARSER DÙNG CHUNG
+// RSS PARSER + NGUỒN TRUYỆN VIỆT NAM
 // ----------------------
+
+// Dùng rss-parser đọc RSS chuẩn, ít lỗi hơn regex thủ công
 const rss = new Parser({
-  headers: { "User-Agent": "VN-Story-News-MCP" }
+  headers: { "User-Agent": "VN-Story-MCP" }
 });
+
+const SOURCES = [
+  "https://vnexpress.net/rss/giai-tri.rss",
+  "https://zingnews.vn/rss/van-hoa.rss",
+  "https://baomoi.com/rss/giai-tri.rss",
+  "https://dantri.com.vn/rss/van-hoa.rss",
+  "https://tuoitre.vn/rss/van-hoa.rss"
+];
 
 // Hàm tiện ích: bỏ tag HTML, gom khoảng trắng
 function stripHtml(html = "") {
   return html
-    .replace(/<[^>]+>/g, " ")
+    .replace(/<[^>]+>/g, " ") // bỏ tất cả thẻ <tag>
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
@@ -51,18 +61,9 @@ function splitToParts(text, maxLen = 800) {
   return parts.filter((p) => p.trim().length > 0);
 }
 
-/* =================================================
- * 1) TOOL KỂ CHUYỆN VIỆT NAM (GIỮ NGUYÊN, ĐANG CHẠY TỐT)
- * ================================================= */
-
-const STORY_SOURCES = [
-  "https://vnexpress.net/rss/giai-tri.rss",
-  "https://zingnews.vn/rss/van-hoa.rss",
-  "https://baomoi.com/rss/giai-tri.rss",
-  "https://dantri.com.vn/rss/van-hoa.rss",
-  "https://tuoitre.vn/rss/van-hoa.rss"
-];
-
+// ----------------------
+// TOOL: get_vietnamese_stories
+// ----------------------
 server.registerTool(
   "get_vietnamese_stories",
   {
@@ -93,17 +94,21 @@ server.registerTool(
   async ({ topic }) => {
     const results = [];
     const topicLower = topic ? topic.toLowerCase() : null;
+
+    // Dùng Set để tránh trùng tiêu đề giữa các báo
     const seenTitles = new Set();
 
-    for (const url of STORY_SOURCES) {
+    for (const url of SOURCES) {
       try {
         const feed = await rss.parseURL(url);
         const items = feed.items || [];
 
+        // Mỗi nguồn lấy tối đa 3 truyện
         for (const item of items.slice(0, 3)) {
           const title = (item.title || "Không có tiêu đề").trim();
           const link = (item.link || "").trim();
 
+          // Nội dung ngắn ưu tiên: content:encoded -> content -> snippet
           const raw =
             item["content:encoded"] ||
             item.content ||
@@ -111,8 +116,11 @@ server.registerTool(
             "";
 
           const text = stripHtml(raw);
+
+          // Bỏ qua nếu không có nội dung
           if (!text) continue;
 
+          // Lọc theo chủ đề nếu có
           if (
             topicLower &&
             !title.toLowerCase().includes(topicLower) &&
@@ -121,11 +129,15 @@ server.registerTool(
             continue;
           }
 
+          // Tránh truyện trùng tiêu đề
           const normTitle = title.toLowerCase();
           if (seenTitles.has(normTitle)) continue;
           seenTitles.add(normTitle);
 
+          // Chia truyện dài thành từng phần ~800 ký tự
           const parts = splitToParts(text, 800);
+
+          // Mô tả ngắn gửi cho robot để giới thiệu
           const shortDesc =
             text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
 
@@ -137,7 +149,8 @@ server.registerTool(
           });
         }
       } catch (err) {
-        console.error("Lỗi đọc RSS (story) từ", url, ":", err.message);
+        console.error("Lỗi đọc RSS từ", url, ":", err.message);
+        // Không throw ra ngoài để tránh làm hỏng toàn bộ response
       }
     }
 
@@ -157,6 +170,36 @@ server.registerTool(
     });
   }
 );
+
+// ----------------------
+// KHỞI ĐỘNG MCP SERVER
+// ----------------------
+const app = express();
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("Vietnam Story MCP server is running. Use POST /mcp for MCP clients.");
+});
+
+app.get("/mcp", (req, res) => {
+  res.send("MCP endpoint active. Use POST /mcp.");
+});
+
+app.post("/mcp", async (req, res) => {
+  const transport = new StreamableHTTPServerTransport({
+    enableJsonResponse: true
+  });
+
+  res.on("close", () => transport.close());
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Vietnam Story MCP running at http://localhost:${port}/mcp`);
+});
+
 
 /* =================================================
  * 2) TOOL TIN TỨC VIỆT NAM + BBC THEO CHỦ ĐỀ
