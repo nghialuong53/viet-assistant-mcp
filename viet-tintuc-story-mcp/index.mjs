@@ -1016,3 +1016,4 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Vietnam Story & News MCP running at http://localhost:${port}/mcp`);
 });
+
