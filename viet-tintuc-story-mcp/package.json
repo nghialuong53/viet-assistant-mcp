@@ -1,7 +1,7 @@
 {
   "name": "viet-story-mcp",
   "version": "1.2.0",
-  "description": "MCP kể chuyện + tin tức Việt Nam & BBC + giá vàng & USD + Toán tiểu học + truyện quốc tế.",
+  "description": "MCP kể chuyện + tin tức Việt Nam & BBC.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
