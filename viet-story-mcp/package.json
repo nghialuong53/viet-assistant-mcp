@@ -1,15 +1,16 @@
 {
-  "name": "vn-news-story-mcp",
-  "version": "1.0.0",
-  "description": "MCP cập nhật tin tức Việt Nam theo chủ đề và truyện cổ tích/truyện thiếu nhi.",
+  "name": "viet-story-mcp",
+  "version": "1.1.0",
+  "description": "MCP kể chuyện Việt Nam + truyện/sách từ kho sách điện tử & chuyên mục sách Việt Nam.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs"
   },
- "dependencies": {
-  "@modelcontextprotocol/sdk": "^1.0.0",
-  "express": "^4.21.0",
-  "zod": "^3.25.0",
-  "rss-parser": "^3.13.0"
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.21.0",
+    "zod": "^3.25.0",
+    "rss-parser": "^3.13.0"
+  }
 }
