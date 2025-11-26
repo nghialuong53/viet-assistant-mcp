@@ -1,7 +1,7 @@
 {
   "name": "viet-story-mcp",
-  "version": "1.1.0",
-  "description": "MCP kể chuyện Việt Nam + truyện/sách từ kho sách điện tử & chuyên mục sách Việt Nam.",
+  "version": "1.2.0",
+  "description": "MCP kể chuyện Việt Nam + truyện/sách từ kho sách & chuyên mục sách Việt Nam.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
