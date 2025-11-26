@@ -1,7 +1,7 @@
 // index.mjs
 // MCP server: 2 tiện ích
-// 1) Kể chuyện Việt Nam (từ báo, mục giải trí / văn hóa)
-// 2) Truyện / bài sách từ kho sách điện tử & chuyên mục sách (báo lớn VN)
+// 1) Kể chuyện Việt Nam từ báo lớn VN
+// 2) Truyện / bài sách từ chuyên mục sách & kho sách điện tử VN
 
 import express from "express";
 import Parser from "rss-parser";
@@ -14,7 +14,7 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "viet-story-mcp",
-  version: "1.1.0"
+  version: "1.2.0"
 });
 
 function makeResult(output) {
@@ -28,7 +28,6 @@ function makeResult(output) {
 // RSS PARSER DÙNG CHUNG
 // ----------------------
 
-// Dùng rss-parser đọc RSS chuẩn, ổn định hơn tự parse HTML
 const rss = new Parser({
   headers: { "User-Agent": "VN-Story-Book-MCP" }
 });
@@ -69,7 +68,7 @@ const STORY_SOURCES = [
   {
     id: "zing_vanhoa",
     name: "Zing Văn hóa",
-    rss: "https://news.zing.vn/rss/van-hoa.rss"
+    rss: "https://zingnews.vn/rss/van-hoa.rss"
   },
   {
     id: "baomoi_giaitri",
@@ -98,7 +97,9 @@ server.registerTool(
       topic: z
         .string()
         .optional()
-        .describe("Chủ đề muốn nghe (ví dụ: cổ tích, hài hước, tình cảm, nhân quả...)")
+        .describe(
+          "Chủ đề muốn nghe (ví dụ: cổ tích, hài hước, tình cảm, nhân quả...). Để trống nếu muốn lấy ngẫu nhiên."
+        )
     },
     outputSchema: {
       success: z.boolean(),
@@ -111,7 +112,17 @@ server.registerTool(
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional() // các phần của truyện (text sạch)
+            content: z.array(z.string()).optional()
+          })
+        )
+        .optional(),
+      errors: z
+        .array(
+          z.object({
+            sourceId: z.string(),
+            sourceName: z.string(),
+            rss: z.string(),
+            error: z.string()
           })
         )
         .optional()
@@ -120,21 +131,18 @@ server.registerTool(
   async ({ topic }) => {
     const results = [];
     const topicLower = topic ? topic.toLowerCase() : null;
-
-    // Dùng Set để tránh trùng tiêu đề giữa các báo
     const seenTitles = new Set();
+    const errors = [];
 
     for (const src of STORY_SOURCES) {
       try {
         const feed = await rss.parseURL(src.rss);
         const items = feed.items || [];
 
-        // Mỗi nguồn lấy tối đa 3 truyện
-        for (const item of items.slice(0, 3)) {
+        for (const item of items.slice(0, 5)) {
           const title = (item.title || "Không có tiêu đề").trim();
           const link = (item.link || "").trim();
 
-          // Nội dung ngắn ưu tiên: content:encoded -> content -> snippet -> description
           const raw =
             item["content:encoded"] ||
             item.content ||
@@ -144,11 +152,8 @@ server.registerTool(
             "";
 
           const text = stripHtml(raw);
+          if (!title || !link || !text) continue;
 
-          // Bỏ qua nếu không có nội dung
-          if (!text) continue;
-
-          // Lọc theo chủ đề nếu có
           if (
             topicLower &&
             !title.toLowerCase().includes(topicLower) &&
@@ -157,15 +162,11 @@ server.registerTool(
             continue;
           }
 
-          // Tránh truyện trùng tiêu đề
           const normTitle = title.toLowerCase();
           if (seenTitles.has(normTitle)) continue;
           seenTitles.add(normTitle);
 
-          // Chia truyện dài thành từng phần ~800 ký tự
           const parts = splitToParts(text, 800);
-
-          // Mô tả ngắn gửi cho robot để giới thiệu
           const shortDesc =
             text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
 
@@ -180,50 +181,57 @@ server.registerTool(
         }
       } catch (err) {
         console.error("Lỗi đọc RSS (story) từ", src.rss, ":", err.message);
-        // Không throw ra ngoài để tránh làm hỏng toàn bộ response
+        errors.push({
+          sourceId: src.id,
+          sourceName: src.name,
+          rss: src.rss,
+          error: String(err.message || err)
+        });
       }
     }
 
     if (results.length === 0) {
+      // phân biệt 2 trường hợp cho robot nói đúng
+      let message;
+      if (errors.length === STORY_SOURCES.length) {
+        message =
+          "Không truy cập được bất kỳ nguồn truyện nào (có thể do server bị chặn mạng hoặc lỗi tạm thời). Thử lại sau vài phút.";
+      } else if (topicLower) {
+        message =
+          "Không tìm thấy truyện nào khớp với chủ đề bạn yêu cầu. Hãy thử từ khóa đơn giản hơn (ví dụ: 'cổ tích', 'hài hước', 'thiếu nhi').";
+      } else {
+        message =
+          "Không tìm thấy truyện nào từ các nguồn hiện tại. Có thể các báo đang tạm lỗi RSS hoặc thay đổi cấu trúc.";
+      }
+
       return makeResult({
         success: false,
-        message:
-          "Không tìm thấy truyện nào phù hợp. Hãy thử lại với chủ đề khác (ví dụ: cổ tích, hài hước, tình cảm...)"
+        message,
+        stories: [],
+        errors: errors.length ? errors : undefined
       });
     }
 
     return makeResult({
       success: true,
       message:
-        "Các truyện Việt Nam đã được tìm thấy. Mỗi truyện đã được làm sạch HTML và chia thành nhiều phần nếu dài.",
-      stories: results
+        "Đã lấy danh sách truyện Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.",
+      stories: results,
+      errors: errors.length ? errors : undefined
     });
   }
 );
 
 /* =================================================
- * 2) TOOL: TRUYỆN / SÁCH TỪ KHO SÁCH ĐIỆN TỬ & MỤC SÁCH
+ * 2) TOOL TRUYỆN / SÁCH TỪ CHUYÊN MỤC SÁCH & KHO SÁCH VN
  * ================================================= */
 
-/**
- * Ở Việt Nam, các “kho sách điện tử” lớn thường không mở API public.
- * Cách an toàn là dùng RSS của:
- *  - Các chuyên mục sách / xuất bản / văn hóa đọc trên báo lớn (Zing Xuất bản, v.v.) :contentReference[oaicite:1]{index=1}
- *  - Một số mục văn hóa / sách lâu năm khác (VnExpress, Dân Trí, Tuổi Trẻ...)
- *
- * Robot có thể:
- *  - Lấy nội dung bài giới thiệu sách, trích đoạn, bài viết về văn hóa đọc
- *  - Làm sạch HTML → chia nhỏ → đọc thành “sách nói” tiếng Việt cho người dùng
- */
-
 const BOOK_SOURCES = [
-  // Zing News – chuyên mục Xuất bản (sách, tác giả, trích đoạn) – RSS công khai
   {
     id: "zing_xuatban",
     name: "Zing Xuất bản",
-    rss: "https://news.zing.vn/rss/xuat-ban.rss"
+    rss: "https://zingnews.vn/rss/xuat-ban.rss"
   },
-  // Một số mục văn hóa/sách khác (dùng chung với truyện nhưng tập trung bài sách, review)
   {
     id: "vnexpress_vanhoa",
     name: "VnExpress Văn hóa",
@@ -237,7 +245,7 @@ const BOOK_SOURCES = [
   {
     id: "tuoitre_sach",
     name: "Tuổi Trẻ Sách (văn hóa đọc)",
-    rss: "https://tuoitre.vn/rss/sach.rss" // nếu sai định dạng → sẽ bị catch, không làm rớt tool
+    rss: "https://tuoitre.vn/rss/sach.rss"
   }
 ];
 
@@ -246,13 +254,13 @@ server.registerTool(
   {
     title: "Truyện & sách từ kho sách điện tử Việt Nam",
     description:
-      "Lấy các bài giới thiệu sách, trích đoạn, truyện dài, truyện ngắn từ chuyên mục sách / xuất bản / văn hóa đọc trên các báo, kho sách điện tử Việt Nam. Nội dung được làm sạch HTML và chia thành nhiều phần ~800 ký tự để robot đọc tiếng Việt.",
+      "Lấy bài viết giới thiệu sách, trích đoạn truyện, nội dung về văn hóa đọc từ các chuyên mục sách/ xuất bản của báo Việt Nam. Text sạch, chia thành các đoạn ~800 ký tự.",
     inputSchema: {
       topic: z
         .string()
         .optional()
         .describe(
-          "Chủ đề sách / truyện muốn nghe (ví dụ: thiếu nhi, kỹ năng sống, kinh doanh, lịch sử, tình cảm...). Dùng tiếng Việt."
+          "Chủ đề sách / truyện (ví dụ: thiếu nhi, kỹ năng sống, kinh doanh, lịch sử, tình cảm...). Dùng tiếng Việt."
         )
     },
     outputSchema: {
@@ -266,7 +274,17 @@ server.registerTool(
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional() // text sạch, đã chia phần
+            content: z.array(z.string()).optional()
+          })
+        )
+        .optional(),
+      errors: z
+        .array(
+          z.object({
+            sourceId: z.string(),
+            sourceName: z.string(),
+            rss: z.string(),
+            error: z.string()
           })
         )
         .optional()
@@ -276,13 +294,13 @@ server.registerTool(
     const topicLower = topic ? topic.toLowerCase() : null;
     const results = [];
     const seenTitles = new Set();
+    const errors = [];
 
     for (const src of BOOK_SOURCES) {
       try {
         const feed = await rss.parseURL(src.rss);
         const items = feed.items || [];
 
-        // Mỗi nguồn lấy tối đa 5 bài sách / truyện
         for (const item of items.slice(0, 5)) {
           const title = (item.title || "Không có tiêu đề").trim();
           const link = (item.link || "").trim();
@@ -296,10 +314,8 @@ server.registerTool(
             "";
 
           const text = stripHtml(raw);
-
           if (!title || !link || !text) continue;
 
-          // Lọc theo chủ đề nếu có
           if (
             topicLower &&
             !title.toLowerCase().includes(topicLower) &&
@@ -308,7 +324,6 @@ server.registerTool(
             continue;
           }
 
-          // Chống trùng theo tiêu đề
           const normTitle = title.toLowerCase();
           if (seenTitles.has(normTitle)) continue;
           seenTitles.add(normTitle);
@@ -328,23 +343,42 @@ server.registerTool(
         }
       } catch (err) {
         console.error("Lỗi đọc RSS (ebook) từ", src.rss, ":", err.message);
-        // Không throw: 1 nguồn chết, các nguồn khác vẫn chạy
+        errors.push({
+          sourceId: src.id,
+          sourceName: src.name,
+          rss: src.rss,
+          error: String(err.message || err)
+        });
       }
     }
 
     if (results.length === 0) {
+      let message;
+      if (errors.length === BOOK_SOURCES.length) {
+        message =
+          "Không truy cập được bất kỳ nguồn sách nào (có thể do server bị chặn mạng hoặc lỗi tạm thời). Thử lại sau vài phút.";
+      } else if (topicLower) {
+        message =
+          "Không tìm thấy bài nào khớp với chủ đề bạn yêu cầu. Hãy thử từ khóa khác (ví dụ: thiếu nhi, kỹ năng, kinh doanh).";
+      } else {
+        message =
+          "Không tìm thấy bài sách / truyện nào từ các nguồn hiện tại. Có thể RSS đang thay đổi.";
+      }
+
       return makeResult({
         success: false,
-        message:
-          "Không tìm thấy truyện / sách phù hợp. Hãy thử lại với chủ đề khác (ví dụ: thiếu nhi, kỹ năng, kinh doanh, lịch sử...)."
+        message,
+        books: [],
+        errors: errors.length ? errors : undefined
       });
     }
 
     return makeResult({
       success: true,
       message:
-        "Đã lấy danh sách truyện / sách từ các nguồn điện tử Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.",
-      books: results
+        "Đã lấy danh sách truyện / bài sách Việt Nam. Nội dung sạch và đã chia nhiều phần để robot đọc.",
+      books: results,
+      errors: errors.length ? errors : undefined
     });
   }
 );
