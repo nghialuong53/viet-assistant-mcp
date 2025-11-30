@@ -14,3 +14,18 @@
     "rss-parser": "^3.13.0"
   }
 }
+{
+  "name": "mcp-news-ai",
+  "version": "1.0.0",
+  "description": "Robot AI MCP server đọc tin quốc tế tiếng Việt và tiếng Anh, tự dịch sang tiếng Việt.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {
+    "@vitalets/google-translate-api": "^9.2.0",
+    "express": "^4.21.1",
+    "rss-parser": "^3.13.0"
+  }
+}
