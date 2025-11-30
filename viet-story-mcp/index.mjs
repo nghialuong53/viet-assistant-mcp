@@ -416,3 +416,122 @@ app.listen(port, () => {
     `Vietnam Story & Book MCP running at http://localhost:${port}/mcp`
   );
 });
+// index.mjs
+// ✅ MCP server: Đọc tin quốc tế (Anh + Việt) → robot dịch sang tiếng Việt
+
+import express from "express";
+import Parser from "rss-parser";
+import translate from "@vitalets/google-translate-api";
+
+const app = express();
+const parser = new Parser();
+
+// --- CÁC NGUỒN TIN CHÍNH THỐNG ---
+const SOURCES = {
+  "Thế giới": [
+    "https://www.bbc.com/vietnamese/index.xml",
+    "https://vnexpress.net/rss/the-gioi.rss",
+    "https://www.voatiengviet.com/api/z$yyteitit",
+  ],
+  "Kinh tế": [
+    "https://vnexpress.net/rss/kinh-doanh.rss",
+    "https://www.reuters.com/rssFeed/businessNews",
+  ],
+  "Công nghệ": [
+    "https://vnexpress.net/rss/so-hoa.rss",
+    "https://www.cnet.com/rss/news/",
+    "https://www.techradar.com/rss",
+  ],
+  "Giáo dục": [
+    "https://vnexpress.net/rss/giao-duc.rss",
+    "https://www.voatiengviet.com/api/zt$qtiequt",
+  ],
+  "Văn hóa": [
+    "https://www.rfi.fr/vi/văn-hóa/rss",
+    "https://vnexpress.net/rss/giai-tri.rss",
+  ],
+  "Khoa học": [
+    "https://vnexpress.net/rss/khoa-hoc.rss",
+    "https://www.sciencedaily.com/rss/top.xml",
+  ],
+};
+
+// --- API: GỢI Ý CHỦ ĐỀ ---
+app.get("/topics", (req, res) => {
+  res.json({
+    message: "Chọn 1 chủ đề tin tức để nghe:",
+    topics: Object.keys(SOURCES),
+  });
+});
+
+// --- API: LẤY DANH SÁCH TIÊU ĐỀ THEO CHỦ ĐỀ ---
+app.get("/titles/:topic", async (req, res) => {
+  const topic = req.params.topic;
+  const feeds = SOURCES[topic];
+  if (!feeds) return res.status(404).json({ error: "Chủ đề không hợp lệ." });
+
+  let items = [];
+  for (const url of feeds) {
+    try {
+      const feed = await parser.parseURL(url);
+      items.push(...feed.items.slice(0, 5)); // Lấy 5 tin mới nhất mỗi nguồn
+    } catch (e) {
+      console.error("Lỗi đọc RSS:", e.message);
+    }
+  }
+
+  if (items.length === 0)
+    return res.json({ message: "Không tải được tin tức cho chủ đề này." });
+
+  const results = items.map((i, index) => ({
+    id: index + 1,
+    title: i.title,
+    link: i.link,
+    source: i.link?.split("/")[2] || "unknown",
+  }));
+
+  res.json({
+    topic,
+    message: `Có ${results.length} tin mới về ${topic}:`,
+    titles: results,
+  });
+});
+
+// --- API: ĐỌC TIN THEO TIÊU ĐỀ (DỊCH SANG TIẾNG VIỆT) ---
+app.get("/read", async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: "Thiếu đường dẫn tin." });
+
+  try {
+    const feed = await parser.parseURL(url);
+    const item = feed.items?.[0] || {};
+
+    // Nếu RSS không có nội dung, trả về mô tả
+    let text = item.contentSnippet || item.content || item.summary || "";
+    if (!text) text = "Không có nội dung chi tiết trong nguồn này.";
+
+    // Dịch sang tiếng Việt
+    const translated = await translate(text, { to: "vi" });
+
+    res.json({
+      original_title: item.title,
+      translated_title: (await translate(item.title, { to: "vi" })).text,
+      source: url,
+      content_vi: translated.text,
+    });
+  } catch (err) {
+    console.error("Lỗi đọc hoặc dịch:", err.message);
+    res.status(500).json({ error: "Không đọc được nội dung tin tức." });
+  }
+});
+
+// --- CHẠY SERVER ---
+const PORT = 8080;
+app.listen(PORT, () => {
+  console.log(`✅ MCP News Server đang chạy tại http://localhost:${PORT}`);
+  console.log("API sẵn sàng:");
+  console.log(" - /topics               → Gợi ý chủ đề");
+  console.log(" - /titles/:topic        → Xem tiêu đề tin theo chủ đề");
+  console.log(" - /read?url=RSS_FEED    → Dịch và đọc tin cụ thể");
+});
+
