@@ -1,7 +1,7 @@
 {
   "name": "viet-story-mcp",
-  "version": "1.2.0",
-  "description": "MCP kể chuyện Việt Nam + truyện/sách từ kho sách & chuyên mục sách Việt Nam.",
+  "version": "1.3.0",
+  "description": "MCP kể chuyện Việt Nam + truyện/sách + tin tức quốc tế dịch sang tiếng Việt cho robot AI.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
@@ -9,23 +9,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "express": "^4.21.0",
-    "zod": "^3.25.0",
-    "rss-parser": "^3.13.0"
-  }
-}
-{
-  "name": "mcp-news-ai",
-  "version": "1.0.0",
-  "description": "Robot AI MCP server đọc tin quốc tế tiếng Việt và tiếng Anh, tự dịch sang tiếng Việt.",
-  "type": "module",
-  "main": "index.mjs",
-  "scripts": {
-    "start": "node index.mjs"
-  },
-  "dependencies": {
     "@vitalets/google-translate-api": "^9.2.0",
-    "express": "^4.21.1",
-    "rss-parser": "^3.13.0"
+    "express": "^4.21.0",
+    "rss-parser": "^3.13.0",
+    "zod": "^3.25.0"
   }
 }
