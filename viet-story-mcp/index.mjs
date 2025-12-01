@@ -1,8 +1,8 @@
 // index.mjs
-// MCP server: 3 tiện ích
-// 1) Kể chuyện Việt Nam từ báo lớn VN
-// 2) Truyện / bài sách từ chuyên mục sách & kho sách điện tử VN
-// 3) Tin tức quốc tế (Anh + Việt) để robot dịch sang tiếng Việt
+// MCP server: 3 tiện ích (FULL CONTENT, KHÔNG TÓM TẮT)
+// 1) Kể chuyện Việt Nam từ báo lớn VN (đầy đủ nội dung gốc)
+// 2) Truyện / bài sách từ chuyên mục sách & kho sách điện tử VN (đầy đủ)
+// 3) Tin tức quốc tế (Anh + Việt) dịch FULL sang tiếng Việt (không rút gọn)
 
 import express from "express";
 import Parser from "rss-parser";
@@ -16,7 +16,7 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "viet-story-mcp",
-  version: "1.3.0"
+  version: "1.4.0"
 });
 
 function makeResult(output) {
@@ -45,7 +45,7 @@ function stripHtml(html = "") {
 }
 
 // Chia text thành các đoạn maxLen ký tự, bỏ đoạn rỗng
-function splitToParts(text, maxLen = 800) {
+function splitToParts(text, maxLen = 1200) {
   if (!text) return [];
   const parts = [];
   let i = 0;
@@ -56,8 +56,24 @@ function splitToParts(text, maxLen = 800) {
   return parts.filter((p) => p.trim().length > 0);
 }
 
+// Dịch text dài theo từng khúc nhỏ để tránh lỗi
+async function translateFull(text, to = "vi", chunkSize = 2500) {
+  if (!text) return "";
+  if (text.length <= chunkSize) {
+    const r = await translate(text, { to });
+    return r.text;
+  }
+  const chunks = splitToParts(text, chunkSize);
+  const out = [];
+  for (const c of chunks) {
+    const r = await translate(c, { to });
+    out.push(r.text);
+  }
+  return out.join(" ");
+}
+
 /* =================================================
- * 1) TOOL KỂ CHUYỆN VIỆT NAM
+ * 1) TOOL KỂ CHUYỆN VIỆT NAM (FULL NỘI DUNG GỐC)
  * ================================================= */
 
 const STORY_SOURCES = [
@@ -91,9 +107,9 @@ const STORY_SOURCES = [
 server.registerTool(
   "get_vietnamese_stories",
   {
-    title: "Kể chuyện Việt Nam",
+    title: "Kể chuyện Việt Nam (đầy đủ nội dung)",
     description:
-      "Tự động lấy truyện ngắn, cổ tích hoặc truyện giải trí từ các trang báo Việt Nam. Nội dung được làm sạch HTML và chia thành nhiều phần nếu dài.",
+      "Tự động lấy truyện ngắn, cổ tích hoặc truyện giải trí từ các trang báo Việt Nam. Trả về FULL nội dung gốc (không tóm tắt), kèm mảng 'parts' để robot đọc từng đoạn.",
     inputSchema: {
       topic: z
         .string()
@@ -109,11 +125,11 @@ server.registerTool(
         .array(
           z.object({
             title: z.string(),
-            description: z.string().optional(),
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional()
+            fullText: z.string(), // toàn bộ truyện
+            parts: z.array(z.string()) // các đoạn ~1200 ký tự, đủ hết truyện
           })
         )
         .optional(),
@@ -167,17 +183,15 @@ server.registerTool(
           if (seenTitles.has(normTitle)) continue;
           seenTitles.add(normTitle);
 
-          const parts = splitToParts(text, 800);
-          const shortDesc =
-            text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
+          const parts = splitToParts(text, 1200);
 
           results.push({
             title,
-            description: shortDesc,
             link,
             sourceId: src.id,
             sourceName: src.name,
-            content: parts
+            fullText: text,
+            parts
           });
         }
       } catch (err) {
@@ -215,7 +229,7 @@ server.registerTool(
     return makeResult({
       success: true,
       message:
-        "Đã lấy danh sách truyện Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.",
+        "Đã lấy danh sách truyện Việt Nam. Mỗi truyện có 'fullText' (nội dung đầy đủ) và 'parts' để robot đọc từng đoạn, KHÔNG TÓM TẮT.",
       stories: results,
       errors: errors.length ? errors : undefined
     });
@@ -223,7 +237,7 @@ server.registerTool(
 );
 
 /* =================================================
- * 2) TOOL TRUYỆN / SÁCH TỪ CHUYÊN MỤC SÁCH & KHO SÁCH VN
+ * 2) TOOL TRUYỆN / SÁCH TỪ CHUYÊN MỤC SÁCH & KHO SÁCH VN (FULL)
  * ================================================= */
 
 const BOOK_SOURCES = [
@@ -252,9 +266,9 @@ const BOOK_SOURCES = [
 server.registerTool(
   "get_vietnamese_ebooks",
   {
-    title: "Truyện & sách từ kho sách điện tử Việt Nam",
+    title: "Truyện & sách điện tử Việt Nam (nội dung đầy đủ)",
     description:
-      "Lấy bài viết giới thiệu sách, trích đoạn truyện, nội dung về văn hóa đọc từ các chuyên mục sách/ xuất bản của báo Việt Nam. Text sạch, chia thành các đoạn ~800 ký tự.",
+      "Lấy bài viết giới thiệu sách, trích đoạn truyện, nội dung về văn hóa đọc từ các chuyên mục sách / xuất bản của báo Việt Nam. Trả FULL text (không tóm tắt), kèm 'parts' để robot đọc.",
     inputSchema: {
       topic: z
         .string()
@@ -270,11 +284,11 @@ server.registerTool(
         .array(
           z.object({
             title: z.string(),
-            description: z.string().optional(),
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional()
+            fullText: z.string(), // nội dung bài sách/truyện
+            parts: z.array(z.string()) // các đoạn ~1200 ký tự
           })
         )
         .optional(),
@@ -328,17 +342,15 @@ server.registerTool(
           if (seenTitles.has(normTitle)) continue;
           seenTitles.add(normTitle);
 
-          const parts = splitToParts(text, 800);
-          const shortDesc =
-            text.length > 200 ? text.slice(0, 200).trim() + "..." : text;
+          const parts = splitToParts(text, 1200);
 
           results.push({
             title,
-            description: shortDesc,
             link,
             sourceId: src.id,
             sourceName: src.name,
-            content: parts
+            fullText: text,
+            parts
           });
         }
       } catch (err) {
@@ -376,7 +388,7 @@ server.registerTool(
     return makeResult({
       success: true,
       message:
-        "Đã lấy danh sách truyện / bài sách Việt Nam. Nội dung sạch và đã chia nhiều phần để robot đọc.",
+        "Đã lấy danh sách truyện / bài sách Việt Nam. Mỗi bài có 'fullText' đầy đủ và 'parts' để robot đọc, KHÔNG TÓM TẮT.",
       books: results,
       errors: errors.length ? errors : undefined
     });
@@ -384,7 +396,7 @@ server.registerTool(
 );
 
 /* =================================================
- * 3) TOOL TIN TỨC QUỐC TẾ (ANH + VIỆT) DỊCH SANG TIẾNG VIỆT
+ * 3) TOOL TIN TỨC QUỐC TẾ (ANH + VIỆT) DỊCH FULL SANG TIẾNG VIỆT
  * ================================================= */
 
 const NEWS_SOURCES = {
@@ -419,9 +431,9 @@ const NEWS_SOURCES = {
 server.registerTool(
   "get_world_news",
   {
-    title: "Tin tức quốc tế dịch sang tiếng Việt",
+    title: "Tin tức quốc tế dịch FULL sang tiếng Việt",
     description:
-      "Lấy danh sách tin tức theo chủ đề từ các báo/đài quốc tế (Anh + Việt), dịch tiêu đề + nội dung sang tiếng Việt để robot đọc.",
+      "Lấy danh sách tin tức theo chủ đề từ các báo/đài quốc tế (Anh + Việt). Dịch TOÀN BỘ nội dung sang tiếng Việt (không rút gọn). Trả về 'contentViFull' (full text) và 'contentViParts' (các đoạn để robot đọc).",
     inputSchema: {
       topic: z
         .string()
@@ -439,11 +451,11 @@ server.registerTool(
         .array(
           z.object({
             title: z.string(),
-            titleVi: z.string().optional(),
+            titleVi: z.string(), // tiêu đề đã dịch
             link: z.string().optional(),
             source: z.string().optional(),
-            summaryVi: z.string().optional(),
-            contentVi: z.string().optional()
+            contentViFull: z.string(), // toàn bộ bài tiếng Việt
+            contentViParts: z.array(z.string()) // các đoạn tiếng Việt
           })
         )
         .optional(),
@@ -459,7 +471,7 @@ server.registerTool(
     }
   },
   async ({ topic }) => {
-    // Nếu không truyền topic → chỉ trả danh sách chủ đề cho robot gợi ý
+    // Nếu không truyền topic → chỉ trả danh sách chủ đề
     if (!topic) {
       return makeResult({
         success: true,
@@ -503,36 +515,24 @@ server.registerTool(
           const text = stripHtml(raw);
           if (!title || !text) continue;
 
-          // Dịch tiêu đề + nội dung sang tiếng Việt
-          let titleVi = title;
-          let contentVi = text;
-          let summaryVi = text.length > 300 ? text.slice(0, 300).trim() + "..." : text;
-
           try {
-            const [tTitle, tContent] = await Promise.all([
-              translate(title, { to: "vi" }),
-              translate(text, { to: "vi" })
-            ]);
-            titleVi = tTitle.text;
-            contentVi = tContent.text;
-            summaryVi =
-              contentVi.length > 300
-                ? contentVi.slice(0, 300).trim() + "..."
-                : contentVi;
+            const titleVi = await translateFull(title, "vi", 500);
+            const contentViFull = await translateFull(text, "vi", 2500);
+            const contentViParts = splitToParts(contentViFull, 1200);
+
+            results.push({
+              title,
+              titleVi,
+              link,
+              source: link ? link.split("/")[2] : "unknown",
+              contentViFull,
+              contentViParts
+            });
           } catch (e) {
             console.error("Lỗi dịch tin tức:", e.message);
           }
 
-          results.push({
-            title,
-            titleVi,
-            link,
-            source: link ? link.split("/")[2] : "unknown",
-            summaryVi,
-            contentVi
-          });
-
-          if (results.length >= 15) break;
+          if (results.length >= 20) break;
         }
       } catch (err) {
         console.error("Lỗi đọc RSS (news) từ", url, ":", err.message);
@@ -560,7 +560,7 @@ server.registerTool(
       message:
         "Đã lấy danh sách tin tức quốc tế cho chủ đề " +
         topic +
-        ". Robot có thể gợi ý tiêu đề, để bạn chọn rồi đọc nội dung tiếng Việt.",
+        ". Mỗi bài có 'contentViFull' (nguyên văn tiếng Việt, KHÔNG TÓM TẮT) và 'contentViParts' để robot đọc từng đoạn.",
       topic,
       articles: results,
       errors: errors.length ? errors : undefined
@@ -577,7 +577,7 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.send(
-    "Vietnam Story, Book & World News MCP server is running. Use POST /mcp for MCP clients."
+    "Vietnam Story, Book & World News MCP server is running (FULL TEXT mode). Use POST /mcp for MCP clients."
   );
 });
 
@@ -598,6 +598,6 @@ app.post("/mcp", async (req, res) => {
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(
-    `Vietnam Story, Book & World News MCP running at http://localhost:${port}/mcp`
+    `Vietnam Story, Book & World News MCP (FULL TEXT) running at http://localhost:${port}/mcp`
   );
 });
