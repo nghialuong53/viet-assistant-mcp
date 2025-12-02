@@ -1,7 +1,7 @@
 {
   "name": "viet-story-mcp",
-  "version": "1.4.0",
-  "description": "MCP kể chuyện Việt Nam + truyện/sách + tin tức quốc tế dịch sang tiếng Việt cho robot AI.",
+  "version": "2.0.0",
+  "description": "MCP server: Truyện Việt Nam, bài sách, tin tức quốc tế dịch sang tiếng Việt và công cụ lấy nội dung trang web cho Robot AI ESP32-C3.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
@@ -9,12 +9,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@vitalets/google-translate-api": "^9.2.0",
     "express": "^4.21.0",
     "rss-parser": "^3.13.0",
+    "@vitalets/google-translate-api": "^9.2.0",
     "zod": "^3.25.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
