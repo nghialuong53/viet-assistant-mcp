@@ -1,11 +1,11 @@
 {
   "name": "viet-story-mcp",
-  "version": "1.4.0",
-  "description": "MCP kể chuyện Việt Nam + truyện/sách + tin tức quốc tế dịch sang tiếng Việt cho robot AI. Phiên bản cải tiến: cache, timeout, concurrency.",
+  "version": "1.3.0",
+  "description": "MCP kể chuyện Việt Nam + truyện/sách + tin tức quốc tế dịch sang tiếng Việt cho robot AI.",
   "type": "module",
   "main": "index.mjs",
   "scripts": {
-    "start": "node --enable-source-maps index.mjs"
+    "start": "node index.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
