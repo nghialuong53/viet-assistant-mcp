@@ -11,14 +11,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
-// ----------------------
-// TẠO MCP SERVER
-// ----------------------
+/* =================================================
+ * CẤU HÌNH CHUNG
+ * ================================================= */
+
+const APP_NAME = "viet-story-mcp";
+const APP_VERSION = "1.4.0";
+
+const MAX_ITEMS_PER_FEED = 5;     // số bài lấy mỗi nguồn
+const CHUNK_LEN = 800;           // độ dài 1 đoạn text cho robot đọc
+
+// Tạo MCP server
 const server = new McpServer({
-  name: "viet-story-mcp",
-  version: "1.3.0"
+  name: APP_NAME,
+  version: APP_VERSION
 });
 
+// Helper: trả kết quả MCP
 function makeResult(output) {
   return {
     content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
@@ -45,7 +54,7 @@ function stripHtml(html = "") {
 }
 
 // Chia text thành các đoạn maxLen ký tự, bỏ đoạn rỗng
-function splitToParts(text, maxLen = 800) {
+function splitToParts(text, maxLen = CHUNK_LEN) {
   if (!text) return [];
   const parts = [];
   let i = 0;
@@ -54,6 +63,23 @@ function splitToParts(text, maxLen = 800) {
     i += maxLen;
   }
   return parts.filter((p) => p.trim().length > 0);
+}
+
+// Helper: parse 1 RSS với log lỗi rõ ràng
+async function safeParseRss(url, sourceLabel, errors) {
+  try {
+    const feed = await rss.parseURL(url);
+    return feed.items || [];
+  } catch (err) {
+    const msg = String(err?.message || err);
+    console.error(`[RSS ERROR] ${sourceLabel} (${url}):`, msg);
+    errors.push({
+      source: sourceLabel,
+      rss: url,
+      error: msg
+    });
+    return [];
+  }
 }
 
 /* =================================================
@@ -120,8 +146,8 @@ server.registerTool(
       errors: z
         .array(
           z.object({
-            sourceId: z.string(),
-            sourceName: z.string(),
+            sourceId: z.string().optional(),
+            sourceName: z.string().optional(),
             rss: z.string(),
             error: z.string()
           })
@@ -136,66 +162,61 @@ server.registerTool(
     const errors = [];
 
     for (const src of STORY_SOURCES) {
-      try {
-        const feed = await rss.parseURL(src.rss);
-        const items = feed.items || [];
+      const items = await safeParseRss(src.rss, src.name, errors);
 
-        for (const item of items.slice(0, 5)) {
-          const title = (item.title || "Không có tiêu đề").trim();
-          const link = (item.link || "").trim();
+      for (const item of items.slice(0, MAX_ITEMS_PER_FEED)) {
+        const title = (item.title || "Không có tiêu đề").trim();
+        const link = (item.link || "").trim();
 
-          const raw =
-            item["content:encoded"] ||
-            item.content ||
-            item.contentSnippet ||
-            item.summary ||
-            item.description ||
-            "";
+        const raw =
+          item["content:encoded"] ||
+          item.content ||
+          item.contentSnippet ||
+          item.summary ||
+          item.description ||
+          "";
 
-          const text = stripHtml(raw);
-          if (!title || !link || !text) continue;
+        const text = stripHtml(raw);
+        if (!title || !link || !text) continue;
 
-          if (
-            topicLower &&
-            !title.toLowerCase().includes(topicLower) &&
-            !text.toLowerCase().includes(topicLower)
-          ) {
-            continue;
-          }
-
-          const normTitle = title.toLowerCase();
-          if (seenTitles.has(normTitle)) continue;
-          seenTitles.add(normTitle);
-
-          const parts = splitToParts(text, 800);
-          const shortDesc =
-            text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
-
-          results.push({
-            title,
-            description: shortDesc,
-            link,
-            sourceId: src.id,
-            sourceName: src.name,
-            content: parts
-          });
+        // Lọc theo chủ đề nếu có
+        if (
+          topicLower &&
+          !title.toLowerCase().includes(topicLower) &&
+          !text.toLowerCase().includes(topicLower)
+        ) {
+          continue;
         }
-      } catch (err) {
-        console.error("Lỗi đọc RSS (story) từ", src.rss, ":", err.message);
-        errors.push({
+
+        // Tránh trùng tiêu đề
+        const normTitle = title.toLowerCase();
+        if (seenTitles.has(normTitle)) continue;
+        seenTitles.add(normTitle);
+
+        const parts = splitToParts(text);
+        const shortDesc =
+          text.length > 160 ? text.slice(0, 160).trim() + "..." : text;
+
+        results.push({
+          title,
+          description: shortDesc,
+          link,
           sourceId: src.id,
           sourceName: src.name,
-          rss: src.rss,
-          error: String(err.message || err)
+          content: parts
         });
       }
     }
 
+    // Tổng kết kết quả + lỗi
+    const allSourcesFailed =
+      errors.length === STORY_SOURCES.length && results.length === 0;
+
     if (results.length === 0) {
       let message;
-      if (errors.length === STORY_SOURCES.length) {
+      if (allSourcesFailed) {
         message =
-          "Không truy cập được bất kỳ nguồn truyện nào (có thể do server bị chặn mạng hoặc lỗi tạm thời). Thử lại sau vài phút.";
+          "Không truy cập được bất kỳ nguồn truyện nào. Có thể server bị chặn mạng (firewall), đứt cáp, hoặc RSS tạm thời bị lỗi. Thử lại sau vài phút hoặc dùng Wi-Fi khác.";
       } else if (topicLower) {
         message =
           "Không tìm thấy truyện nào khớp với chủ đề bạn yêu cầu. Hãy thử từ khóa đơn giản hơn (ví dụ: 'cổ tích', 'hài hước', 'thiếu nhi').";
@@ -208,16 +229,37 @@ server.registerTool(
         success: false,
         message,
         stories: [],
-        errors: errors.length ? errors : undefined
+        errors: errors.length
+          ? errors.map((e) => ({
+              sourceId:
+                STORY_SOURCES.find((s) => s.name === e.source)?.id || "",
+              sourceName: e.source,
+              rss: e.rss,
+              error: e.error
+            }))
+          : undefined
       });
     }
 
+    const messageBase =
+      "Đã lấy danh sách truyện Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.";
+    const messageExtra =
+      errors.length > 0
+        ? " Một số nguồn truyện đang không truy cập được, nhưng các nguồn khác vẫn hoạt động."
+        : "";
+
     return makeResult({
       success: true,
-      message:
-        "Đã lấy danh sách truyện Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.",
+      message: messageBase + messageExtra,
       stories: results,
-      errors: errors.length ? errors : undefined
+      errors: errors.length
+        ? errors.map((e) => ({
+            sourceId: STORY_SOURCES.find((s) => s.name === e.source)?.id || "",
+            sourceName: e.source,
+            rss: e.rss,
+            error: e.error
+          }))
+        : undefined
     });
   }
 );
@@ -254,13 +296,13 @@ server.registerTool(
   {
     title: "Truyện & sách từ kho sách điện tử Việt Nam",
     description:
-      "Lấy bài viết giới thiệu sách, trích đoạn truyện, nội dung về văn hóa đọc từ các chuyên mục sách/ xuất bản của báo Việt Nam. Text sạch, chia thành các đoạn ~800 ký tự.",
+      "Lấy bài viết giới thiệu sách, trích đoạn truyện, nội dung về văn hóa đọc từ các chuyên mục sách/xuất bản. Text sạch, chia thành các đoạn ~800 ký tự.",
     inputSchema: {
       topic: z
         .string()
         .optional()
         .describe(
-          "Chủ đề sách / truyện (ví dụ: thiếu nhi, kỹ năng sống, kinh doanh, lịch sử, tình cảm...). Dùng tiếng Việt."
+          "Chủ đề sách/truyện (ví dụ: thiếu nhi, kỹ năng sống, kinh doanh, lịch sử, tình cảm...). Dùng tiếng Việt."
         )
     },
     outputSchema: {
@@ -281,8 +323,8 @@ server.registerTool(
       errors: z
         .array(
           z.object({
-            sourceId: z.string(),
-            sourceName: z.string(),
+            sourceId: z.string().optional(),
+            sourceName: z.string().optional(),
             rss: z.string(),
             error: z.string()
           })
@@ -297,88 +339,101 @@ server.registerTool(
     const errors = [];
 
     for (const src of BOOK_SOURCES) {
-      try {
-        const feed = await rss.parseURL(src.rss);
-        const items = feed.items || [];
+      const items = await safeParseRss(src.rss, src.name, errors);
 
-        for (const item of items.slice(0, 5)) {
-          const title = (item.title || "Không có tiêu đề").trim();
-          const link = (item.link || "").trim();
+      for (const item of items.slice(0, MAX_ITEMS_PER_FEED)) {
+        const title = (item.title || "Không có tiêu đề").trim();
+        const link = (item.link || "").trim();
 
-          const raw =
-            item["content:encoded"] ||
-            item.content ||
-            item.contentSnippet ||
-            item.summary ||
-            item.description ||
-            "";
+        const raw =
+          item["content:encoded"] ||
+          item.content ||
+          item.contentSnippet ||
+          item.summary ||
+          item.description ||
+          "";
 
-          const text = stripHtml(raw);
-          if (!title || !link || !text) continue;
+        const text = stripHtml(raw);
+        if (!title || !link || !text) continue;
 
-          if (
-            topicLower &&
-            !title.toLowerCase().includes(topicLower) &&
-            !text.toLowerCase().includes(topicLower)
-          ) {
-            continue;
-          }
-
-          const normTitle = title.toLowerCase();
-          if (seenTitles.has(normTitle)) continue;
-          seenTitles.add(normTitle);
-
-          const parts = splitToParts(text, 800);
-          const shortDesc =
-            text.length > 200 ? text.slice(0, 200).trim() + "..." : text;
-
-          results.push({
-            title,
-            description: shortDesc,
-            link,
-            sourceId: src.id,
-            sourceName: src.name,
-            content: parts
-          });
+        if (
+          topicLower &&
+          !title.toLowerCase().includes(topicLower) &&
+          !text.toLowerCase().includes(topicLower)
+        ) {
+          continue;
         }
-      } catch (err) {
-        console.error("Lỗi đọc RSS (ebook) từ", src.rss, ":", err.message);
-        errors.push({
+
+        const normTitle = title.toLowerCase();
+        if (seenTitles.has(normTitle)) continue;
+        seenTitles.add(normTitle);
+
+        const parts = splitToParts(text);
+        const shortDesc =
+          text.length > 200 ? text.slice(0, 200).trim() + "..." : text;
+
+        results.push({
+          title,
+          description: shortDesc,
+          link,
           sourceId: src.id,
           sourceName: src.name,
-          rss: src.rss,
-          error: String(err.message || err)
+          content: parts
         });
       }
     }
 
+    const allSourcesFailed =
+      errors.length === BOOK_SOURCES.length && results.length === 0;
+
     if (results.length === 0) {
       let message;
-      if (errors.length === BOOK_SOURCES.length) {
+      if (allSourcesFailed) {
         message =
-          "Không truy cập được bất kỳ nguồn sách nào (có thể do server bị chặn mạng hoặc lỗi tạm thời). Thử lại sau vài phút.";
+          "Không truy cập được bất kỳ nguồn sách/truyện nào. Có thể server bị chặn mạng (firewall), đứt cáp, hoặc RSS tạm thời bị lỗi. Thử lại sau ít phút.";
       } else if (topicLower) {
         message =
           "Không tìm thấy bài nào khớp với chủ đề bạn yêu cầu. Hãy thử từ khóa khác (ví dụ: thiếu nhi, kỹ năng, kinh doanh).";
       } else {
         message =
-          "Không tìm thấy bài sách / truyện nào từ các nguồn hiện tại. Có thể RSS đang thay đổi.";
+          "Không tìm thấy bài sách/truyện nào từ các nguồn hiện tại. Có thể RSS đang thay đổi.";
       }
 
       return makeResult({
         success: false,
         message,
         books: [],
-        errors: errors.length ? errors : undefined
+        errors: errors.length
+          ? errors.map((e) => ({
+              sourceId:
+                BOOK_SOURCES.find((s) => s.name === e.source)?.id || "",
+              sourceName: e.source,
+              rss: e.rss,
+              error: e.error
+            }))
+          : undefined
       });
     }
 
+    const baseMsg =
+      "Đã lấy danh sách truyện/bài sách Việt Nam. Nội dung sạch và đã chia nhiều phần để robot đọc.";
+    const extraMsg =
+      errors.length > 0
+        ? " Một số nguồn sách đang lỗi nhưng các nguồn khác vẫn OK."
+        : "";
+
     return makeResult({
       success: true,
-      message:
-        "Đã lấy danh sách truyện / bài sách Việt Nam. Nội dung sạch và đã chia nhiều phần để robot đọc.",
+      message: baseMsg + extraMsg,
       books: results,
-      errors: errors.length ? errors : undefined
+      errors: errors.length
+        ? errors.map((e) => ({
+            sourceId: BOOK_SOURCES.find((s) => s.name === e.source)?.id || "",
+            sourceName: e.source,
+            rss: e.rss,
+            error: e.error
+          }))
+        : undefined
     });
   }
 );
@@ -459,7 +514,7 @@ server.registerTool(
     }
   },
   async ({ topic }) => {
-    // Nếu không truyền topic → chỉ trả danh sách chủ đề cho robot gợi ý
+    // Không truyền topic → trả danh sách chủ đề để robot gợi ý
     if (!topic) {
       return makeResult({
         success: true,
@@ -485,82 +540,84 @@ server.registerTool(
     const errors = [];
 
     for (const url of feeds) {
-      try {
-        const feed = await rss.parseURL(url);
-        const items = feed.items || [];
+      const label = url.split("/")[2] || "unknown";
+      const items = await safeParseRss(url, label, errors);
 
-        for (const item of items.slice(0, 5)) {
-          const title = (item.title || "").trim();
-          const link = (item.link || "").trim();
+      for (const item of items.slice(0, MAX_ITEMS_PER_FEED)) {
+        const title = (item.title || "").trim();
+        const link = (item.link || "").trim();
 
-          const raw =
-            item["content:encoded"] ||
-            item.content ||
-            item.summary ||
-            item.contentSnippet ||
-            "";
+        const raw =
+          item["content:encoded"] ||
+          item.content ||
+          item.summary ||
+          item.contentSnippet ||
+          "";
 
-          const text = stripHtml(raw);
-          if (!title || !text) continue;
+        const text = stripHtml(raw);
+        if (!title || !text) continue;
 
-          // Dịch tiêu đề + nội dung sang tiếng Việt
-          let titleVi = title;
-          let contentVi = text;
-          let summaryVi = text.length > 300 ? text.slice(0, 300).trim() + "..." : text;
+        // Dịch tiêu đề + nội dung sang tiếng Việt
+        let titleVi = title;
+        let contentVi = text;
+        let summaryVi =
+          text.length > 300 ? text.slice(0, 300).trim() + "..." : text;
 
-          try {
-            const [tTitle, tContent] = await Promise.all([
-              translate(title, { to: "vi" }),
-              translate(text, { to: "vi" })
-            ]);
-            titleVi = tTitle.text;
-            contentVi = tContent.text;
-            summaryVi =
-              contentVi.length > 300
-                ? contentVi.slice(0, 300).trim() + "..."
-                : contentVi;
-          } catch (e) {
-            console.error("Lỗi dịch tin tức:", e.message);
-          }
-
-          results.push({
-            title,
-            titleVi,
-            link,
-            source: link ? link.split("/")[2] : "unknown",
-            summaryVi,
-            contentVi
-          });
-
-          if (results.length >= 15) break;
+        try {
+          const [tTitle, tContent] = await Promise.all([
+            translate(title, { to: "vi" }),
+            translate(text, { to: "vi" })
+          ]);
+          titleVi = tTitle.text;
+          contentVi = tContent.text;
+          summaryVi =
+            contentVi.length > 300
+              ? contentVi.slice(0, 300).trim() + "..."
+              : contentVi;
+        } catch (e) {
+          console.error("[TRANSLATE ERROR]", e?.message || e);
         }
-      } catch (err) {
-        console.error("Lỗi đọc RSS (news) từ", url, ":", err.message);
-        errors.push({
-          source: url.split("/")[2] || "unknown",
-          rss: url,
-          error: String(err.message || err)
+
+        results.push({
+          title,
+          titleVi,
+          link,
+          source: link ? link.split("/")[2] : label,
+          summaryVi,
+          contentVi
         });
+
+        if (results.length >= 15) break;
       }
     }
 
+    const allFeedsFailed =
+      errors.length === feeds.length && results.length === 0;
+
     if (results.length === 0) {
+      const msg = allFeedsFailed
+        ? "Không lấy được tin tức cho chủ đề này vì tất cả nguồn RSS đều lỗi hoặc bị chặn. Thử lại sau hoặc kiểm tra hạ tầng mạng của server."
+        : "Không lấy được tin tức cho chủ đề này. Có thể các nguồn RSS đang lỗi hoặc bị chặn.";
+
       return makeResult({
         success: false,
-        message:
-          "Không lấy được tin tức cho chủ đề này. Có thể các nguồn RSS đang lỗi hoặc bị chặn.",
+        message: msg,
         topic,
         articles: [],
         errors: errors.length ? errors : undefined
       });
     }
 
+    const baseMsg =
+      "Đã lấy danh sách tin tức quốc tế cho chủ đề " + topic + ". Robot có thể gợi ý tiêu đề để bạn chọn rồi đọc nội dung tiếng Việt.";
+    const extraMsg =
+      errors.length > 0
+        ? " Một số nguồn tin đang gặp lỗi nhưng các nguồn khác vẫn cập nhật được."
+        : "";
+
     return makeResult({
       success: true,
-      message:
-        "Đã lấy danh sách tin tức quốc tế cho chủ đề " +
-        topic +
-        ". Robot có thể gợi ý tiêu đề, để bạn chọn rồi đọc nội dung tiếng Việt.",
+      message: baseMsg + extraMsg,
       topic,
       articles: results,
       errors: errors.length ? errors : undefined
@@ -575,10 +632,20 @@ server.registerTool(
 const app = express();
 app.use(express.json());
 
+// Health check đơn giản
 app.get("/", (req, res) => {
   res.send(
     "Vietnam Story, Book & World News MCP server is running. Use POST /mcp for MCP clients."
   );
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    name: APP_NAME,
+    version: APP_VERSION,
+    time: new Date().toISOString()
+  });
 });
 
 app.get("/mcp", (req, res) => {
