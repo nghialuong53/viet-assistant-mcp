@@ -16,13 +16,14 @@ import { z } from "zod";
 // ----------------------
 const server = new McpServer({
   name: "viet-story-mcp",
-  version: "1.3.0"
+  version: "1.3.0",
 });
 
+// Helper chuẩn MCP: bọc kết quả để client hiểu được cả text lẫn JSON
 function makeResult(output) {
   return {
     content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
-    structuredContent: output
+    structuredContent: output,
   };
 }
 
@@ -31,7 +32,7 @@ function makeResult(output) {
 // ----------------------
 
 const rss = new Parser({
-  headers: { "User-Agent": "VN-Story-Book-MCP" }
+  headers: { "User-Agent": "VN-Story-Book-MCP" },
 });
 
 // Hàm tiện ích: bỏ tag HTML, gom khoảng trắng
@@ -64,28 +65,28 @@ const STORY_SOURCES = [
   {
     id: "vnexpress_giaitri",
     name: "VnExpress Giải trí",
-    rss: "https://vnexpress.net/rss/giai-tri.rss"
+    rss: "https://vnexpress.net/rss/giai-tri.rss",
   },
   {
     id: "zing_vanhoa",
     name: "Zing Văn hóa",
-    rss: "https://zingnews.vn/rss/van-hoa.rss"
+    rss: "https://zingnews.vn/rss/van-hoa.rss",
   },
   {
     id: "baomoi_giaitri",
     name: "Báo Mới Giải trí",
-    rss: "https://baomoi.com/rss/giai-tri.rss"
+    rss: "https://baomoi.com/rss/giai-tri.rss",
   },
   {
     id: "dantri_vanhoa",
     name: "Dân Trí Văn hóa",
-    rss: "https://dantri.com.vn/rss/van-hoa.rss"
+    rss: "https://dantri.com.vn/rss/van-hoa.rss",
   },
   {
     id: "tuoitre_vanhoa",
     name: "Tuổi Trẻ Văn hóa",
-    rss: "https://tuoitre.vn/rss/van-hoa.rss"
-  }
+    rss: "https://tuoitre.vn/rss/van-hoa.rss",
+  },
 ];
 
 server.registerTool(
@@ -100,7 +101,7 @@ server.registerTool(
         .optional()
         .describe(
           "Chủ đề muốn nghe (ví dụ: cổ tích, hài hước, tình cảm, nhân quả...). Để trống nếu muốn lấy ngẫu nhiên."
-        )
+        ),
     },
     outputSchema: {
       success: z.boolean(),
@@ -113,7 +114,7 @@ server.registerTool(
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional()
+            content: z.array(z.string()).optional(),
           })
         )
         .optional(),
@@ -123,11 +124,11 @@ server.registerTool(
             sourceId: z.string(),
             sourceName: z.string(),
             rss: z.string(),
-            error: z.string()
+            error: z.string(),
           })
         )
-        .optional()
-    }
+        .optional(),
+    },
   },
   async ({ topic }) => {
     const results = [];
@@ -177,7 +178,7 @@ server.registerTool(
             link,
             sourceId: src.id,
             sourceName: src.name,
-            content: parts
+            content: parts,
           });
         }
       } catch (err) {
@@ -186,7 +187,7 @@ server.registerTool(
           sourceId: src.id,
           sourceName: src.name,
           rss: src.rss,
-          error: String(err.message || err)
+          error: String(err.message || err),
         });
       }
     }
@@ -208,7 +209,7 @@ server.registerTool(
         success: false,
         message,
         stories: [],
-        errors: errors.length ? errors : undefined
+        errors: errors.length ? errors : undefined,
       });
     }
 
@@ -217,7 +218,7 @@ server.registerTool(
       message:
         "Đã lấy danh sách truyện Việt Nam. Nội dung đã được làm sạch HTML và chia thành nhiều phần để robot đọc.",
       stories: results,
-      errors: errors.length ? errors : undefined
+      errors: errors.length ? errors : undefined,
     });
   }
 );
@@ -230,23 +231,23 @@ const BOOK_SOURCES = [
   {
     id: "zing_xuatban",
     name: "Zing Xuất bản",
-    rss: "https://zingnews.vn/rss/xuat-ban.rss"
+    rss: "https://zingnews.vn/rss/xuat-ban.rss",
   },
   {
     id: "vnexpress_vanhoa",
     name: "VnExpress Văn hóa",
-    rss: "https://vnexpress.net/rss/van-hoa.rss"
+    rss: "https://vnexpress.net/rss/van-hoa.rss",
   },
   {
     id: "dantri_vanhoa",
     name: "Dân Trí Văn hóa",
-    rss: "https://dantri.com.vn/rss/van-hoa.rss"
+    rss: "https://dantri.com.vn/rss/van-hoa.rss",
   },
   {
     id: "tuoitre_sach",
     name: "Tuổi Trẻ Sách (văn hóa đọc)",
-    rss: "https://tuoitre.vn/rss/sach.rss"
-  }
+    rss: "https://tuoitre.vn/rss/sach.rss",
+  },
 ];
 
 server.registerTool(
@@ -261,7 +262,7 @@ server.registerTool(
         .optional()
         .describe(
           "Chủ đề sách / truyện (ví dụ: thiếu nhi, kỹ năng sống, kinh doanh, lịch sử, tình cảm...). Dùng tiếng Việt."
-        )
+        ),
     },
     outputSchema: {
       success: z.boolean(),
@@ -274,7 +275,7 @@ server.registerTool(
             link: z.string(),
             sourceId: z.string().optional(),
             sourceName: z.string().optional(),
-            content: z.array(z.string()).optional()
+            content: z.array(z.string()).optional(),
           })
         )
         .optional(),
@@ -284,11 +285,11 @@ server.registerTool(
             sourceId: z.string(),
             sourceName: z.string(),
             rss: z.string(),
-            error: z.string()
+            error: z.string(),
           })
         )
-        .optional()
-    }
+        .optional(),
+    },
   },
   async ({ topic }) => {
     const topicLower = topic ? topic.toLowerCase() : null;
@@ -338,7 +339,7 @@ server.registerTool(
             link,
             sourceId: src.id,
             sourceName: src.name,
-            content: parts
+            content: parts,
           });
         }
       } catch (err) {
@@ -347,7 +348,7 @@ server.registerTool(
           sourceId: src.id,
           sourceName: src.name,
           rss: src.rss,
-          error: String(err.message || err)
+          error: String(err.message || err),
         });
       }
     }
@@ -369,7 +370,7 @@ server.registerTool(
         success: false,
         message,
         books: [],
-        errors: errors.length ? errors : undefined
+        errors: errors.length ? errors : undefined,
       });
     }
 
@@ -378,7 +379,7 @@ server.registerTool(
       message:
         "Đã lấy danh sách truyện / bài sách Việt Nam. Nội dung sạch và đã chia nhiều phần để robot đọc.",
       books: results,
-      errors: errors.length ? errors : undefined
+      errors: errors.length ? errors : undefined,
     });
   }
 );
@@ -391,29 +392,29 @@ const NEWS_SOURCES = {
   "Thế giới": [
     "https://www.bbc.com/vietnamese/index.xml",
     "https://vnexpress.net/rss/the-gioi.rss",
-    "https://www.voatiengviet.com/api/z$yyteitit"
+    "https://www.voatiengviet.com/api/z$yyteitit",
   ],
   "Kinh tế": [
     "https://vnexpress.net/rss/kinh-doanh.rss",
-    "https://www.reuters.com/rssFeed/businessNews"
+    "https://www.reuters.com/rssFeed/businessNews",
   ],
   "Công nghệ": [
     "https://vnexpress.net/rss/so-hoa.rss",
     "https://www.cnet.com/rss/news/",
-    "https://www.techradar.com/rss"
+    "https://www.techradar.com/rss",
   ],
   "Giáo dục": [
     "https://vnexpress.net/rss/giao-duc.rss",
-    "https://www.voatiengviet.com/api/zt$qtiequt"
+    "https://www.voatiengviet.com/api/zt$qtiequt",
   ],
   "Văn hóa": [
     "https://www.rfi.fr/vi/văn-hóa/rss",
-    "https://vnexpress.net/rss/giai-tri.rss"
+    "https://vnexpress.net/rss/giai-tri.rss",
   ],
   "Khoa học": [
     "https://vnexpress.net/rss/khoa-hoc.rss",
-    "https://www.sciencedaily.com/rss/top.xml"
-  ]
+    "https://www.sciencedaily.com/rss/top.xml",
+  ],
 };
 
 server.registerTool(
@@ -428,7 +429,7 @@ server.registerTool(
         .optional()
         .describe(
           "Chủ đề tin: 'Thế giới', 'Kinh tế', 'Công nghệ', 'Giáo dục', 'Văn hóa', 'Khoa học'. Để trống để xem tất cả chủ đề có sẵn."
-        )
+        ),
     },
     outputSchema: {
       success: z.boolean(),
@@ -443,7 +444,7 @@ server.registerTool(
             link: z.string().optional(),
             source: z.string().optional(),
             summaryVi: z.string().optional(),
-            contentVi: z.string().optional()
+            contentVi: z.string().optional(),
           })
         )
         .optional(),
@@ -452,20 +453,20 @@ server.registerTool(
           z.object({
             source: z.string(),
             rss: z.string(),
-            error: z.string()
+            error: z.string(),
           })
         )
-        .optional()
-    }
+        .optional(),
+    },
   },
   async ({ topic }) => {
-    // Nếu không truyền topic → chỉ trả danh sách chủ đề cho robot gợi ý
+    // Nếu không truyền topic → chỉ trả danh sách chủ đề
     if (!topic) {
       return makeResult({
         success: true,
         message:
           "Danh sách chủ đề tin tức quốc tế. Hãy chọn 1 chủ đề rồi gọi lại tool với tham số 'topic'.",
-        availableTopics: Object.keys(NEWS_SOURCES)
+        availableTopics: Object.keys(NEWS_SOURCES),
       });
     }
 
@@ -477,7 +478,7 @@ server.registerTool(
           "Chủ đề không hợp lệ. Hãy dùng một trong các chủ đề: " +
           Object.keys(NEWS_SOURCES).join(", "),
         topic,
-        articles: []
+        articles: [],
       });
     }
 
@@ -506,12 +507,13 @@ server.registerTool(
           // Dịch tiêu đề + nội dung sang tiếng Việt
           let titleVi = title;
           let contentVi = text;
-          let summaryVi = text.length > 300 ? text.slice(0, 300).trim() + "..." : text;
+          let summaryVi =
+            text.length > 300 ? text.slice(0, 300).trim() + "..." : text;
 
           try {
             const [tTitle, tContent] = await Promise.all([
               translate(title, { to: "vi" }),
-              translate(text, { to: "vi" })
+              translate(text, { to: "vi" }),
             ]);
             titleVi = tTitle.text;
             contentVi = tContent.text;
@@ -529,7 +531,7 @@ server.registerTool(
             link,
             source: link ? link.split("/")[2] : "unknown",
             summaryVi,
-            contentVi
+            contentVi,
           });
 
           if (results.length >= 15) break;
@@ -539,7 +541,7 @@ server.registerTool(
         errors.push({
           source: url.split("/")[2] || "unknown",
           rss: url,
-          error: String(err.message || err)
+          error: String(err.message || err),
         });
       }
     }
@@ -551,7 +553,7 @@ server.registerTool(
           "Không lấy được tin tức cho chủ đề này. Có thể các nguồn RSS đang lỗi hoặc bị chặn.",
         topic,
         articles: [],
-        errors: errors.length ? errors : undefined
+        errors: errors.length ? errors : undefined,
       });
     }
 
@@ -563,7 +565,7 @@ server.registerTool(
         ". Robot có thể gợi ý tiêu đề, để bạn chọn rồi đọc nội dung tiếng Việt.",
       topic,
       articles: results,
-      errors: errors.length ? errors : undefined
+      errors: errors.length ? errors : undefined,
     });
   }
 );
@@ -575,22 +577,25 @@ server.registerTool(
 const app = express();
 app.use(express.json());
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.send(
     "Vietnam Story, Book & World News MCP server is running. Use POST /mcp for MCP clients."
   );
 });
 
-app.get("/mcp", (req, res) => {
+app.get("/mcp", (_req, res) => {
   res.send("MCP endpoint active. Use POST /mcp.");
 });
 
 app.post("/mcp", async (req, res) => {
   const transport = new StreamableHTTPServerTransport({
-    enableJsonResponse: true
+    enableJsonResponse: true,
   });
 
-  res.on("close", () => transport.close());
+  res.on("close", () => {
+    transport.close();
+  });
+
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
@@ -599,5 +604,8 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(
     `Vietnam Story, Book & World News MCP running at http://localhost:${port}/mcp`
+  );
+  console.log(
+    "Đã đăng ký 3 tool: get_vietnamese_stories, get_vietnamese_ebooks, get_world_news"
   );
 });
