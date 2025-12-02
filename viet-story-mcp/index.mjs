@@ -7,7 +7,8 @@
 
 import express from "express";
 import Parser from "rss-parser";
-import translate from "@vitalets/google-translate-api";
+import * as gTranslate from "@vitalets/google-translate-api";
+const translate = gTranslate.default || gTranslate;
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
